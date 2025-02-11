@@ -8,6 +8,7 @@ from . import visualizations
 RESULTS_DIR = "audit_results"
 REPORTS_DIR = os.path.join(RESULTS_DIR, "reports")
 CONFIGS_DIR = os.path.join(RESULTS_DIR, "configs")
+HISTORY_FILE = os.path.join(CONFIGS_DIR, "audit_history.json")
 
 def setup_directories():
     os.makedirs(REPORTS_DIR, exist_ok=True)
@@ -77,11 +78,65 @@ def run_all_checks(args):
     
     # Генерация рекомендаций
     recs = recommendations.generate_advices(REPORTS_DIR)
-    # Генерация итогового отчета и вывод сводки
+    # Генерация итогового отчета и вывод сводки с историей
     generate_report(args.report_level, args.export_format, REPORTS_DIR, recs, args.verbose)
 
+def calculate_rating(summary_metrics):
+    """
+    Рассчитывает оценку от 1 до 10 исходя из количества ошибок.
+    В данном примере:
+      - каждый pylint-ошибка снижает оценку на 0.5
+      - каждая ошибка безопасности снижает оценку на 0.5
+    Начальное значение 10, но не ниже 1.
+    """
+    base_rating = 10.0
+    pylint_errors = summary_metrics.get("pylint_errors", 0)
+    security_errors = summary_metrics.get("security_errors", 0)
+    deduction = 0.5 * (pylint_errors + security_errors)
+    rating = max(1, base_rating - deduction)
+    return round(rating, 1)
+
+def load_previous_history():
+    if os.path.exists(HISTORY_FILE):
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def update_audit_history(current_metrics, current_rating):
+    history = load_previous_history()
+    history["last_audit"] = {
+        "metrics": current_metrics,
+        "rating": current_rating
+    }
+    with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+
 def generate_report(report_level, export_format, reports_dir, recommendations_text, verbose):
-    summary = generate_summary(reports_dir)
+    summary, summary_metrics = generate_summary(reports_dir)
+    current_rating = calculate_rating(summary_metrics)
+    prev_history = load_previous_history()
+    diff = {}
+    if "last_audit" in prev_history:
+        prev_metrics = prev_history["last_audit"]["metrics"]
+        # Сравнение ошибок между аудитами
+        diff["pylint_errors"] = summary_metrics.get("pylint_errors", 0) - prev_metrics.get("pylint_errors", 0)
+        diff["security_errors"] = summary_metrics.get("security_errors", 0) - prev_metrics.get("security_errors", 0)
+    else:
+        diff["pylint_errors"] = 0
+        diff["security_errors"] = 0
+    
+    # Обновление истории аудитов
+    update_audit_history(summary_metrics, current_rating)
+    
+    rating_info = f"Общая оценка кода: {current_rating}/10"
+    diff_info = (
+        f"Изменение pylint ошибок: {'+' if diff['pylint_errors'] >= 0 else ''}{diff['pylint_errors']}\n"
+        f"Изменение ошибок безопасности: {'+' if diff['security_errors'] >= 0 else ''}{diff['security_errors']}"
+    )
+    
     if export_format == "html":
         content = (
             "<html><head><meta charset='utf-8'><title>Отчёт аудита nAUDIT</title></head><body>\n"
@@ -100,7 +155,7 @@ def generate_report(report_level, export_format, reports_dir, recommendations_te
             "<h2>Рекомендации по улучшению проекта</h2>\n"
             f"<p>{recommendations_text.replace(chr(10), '<br>')}</p>\n"
             "<h2>Сводка аудита</h2>\n"
-            f"<pre>{summary}</pre>\n"
+            f"<pre>{summary}\n\n{rating_info}\n\nИзменения по сравнению с предыдущим аудитом:\n{diff_info}</pre>\n"
             "</body></html>"
         )
         report_path = os.path.join(reports_dir, "full_report.html")
@@ -112,6 +167,8 @@ def generate_report(report_level, export_format, reports_dir, recommendations_te
         report_data = {
             "title": "Отчёт аудита nAUDIT",
             "metrics": summary,
+            "rating": current_rating,
+            "differences": diff,
             "recommendations": recommendations_text,
             "details": "Содержимое логов анализа см. в папке с отчётом."
         }
@@ -124,20 +181,22 @@ def generate_report(report_level, export_format, reports_dir, recommendations_te
     # Вывод сводки в терминал
     print("\n[*] Итоговая сводка аудита:")
     print(summary)
+    print(rating_info)
+    print("Изменения по сравнению с предыдущим аудитом:")
+    print(diff_info)
 
 def generate_summary(reports_dir):
     """
     Формирует сводку аудита по итогам логов.
-    Сканирует файлы с логами и возвращает краткую статистику:
-      - Количество найденных ошибок (например, из pylint_report.log)
-      - Проблемные модули (на основе наличия ошибок)
-      - Рекомендации по дальнейшим действиям
+    Возвращает кортеж (строковая сводка, словарь ключевых метрик)
     """
     summary_lines = []
+    metrics = {"pylint_errors": 0, "security_errors": 0}
+    
     # Считаем ошибки из pylint_report.log
     pylint_log = os.path.join(reports_dir, "pylint_report.log")
     error_count = 0
-    problem_modules = set()
+    problematic_files = set()
     if os.path.exists(pylint_log):
         with open(pylint_log, "r", encoding="utf-8") as f:
             for line in f:
@@ -145,10 +204,11 @@ def generate_summary(reports_dir):
                     error_count += 1
                     parts = line.split()
                     if len(parts) >= 2:
-                        problem_modules.add(parts[1])
+                        problematic_files.add(parts[1])
+    metrics["pylint_errors"] = error_count
     summary_lines.append(f"Ошибок в pylint: {error_count}")
-    if problem_modules:
-        summary_lines.append("Проблемные модули/файлы: " + ", ".join(problem_modules))
+    if problematic_files:
+        summary_lines.append("Проблемные модули/файлы: " + ", ".join(problematic_files))
     else:
         summary_lines.append("Проблемные модули не выявлены.")
     
@@ -163,9 +223,10 @@ def generate_summary(reports_dir):
                     sec_errors = len(sec_data["errors"])
         except Exception:
             pass
+    metrics["security_errors"] = sec_errors
     summary_lines.append(f"Ошибок в безопасности (bandit/safety): {sec_errors}")
     
-    # Сводка по сложности кода из cyclomatic_complexity.log
+    # Сложность кода
     complexity_log = os.path.join(reports_dir, "cyclomatic_complexity.log")
     if os.path.exists(complexity_log):
         with open(complexity_log, "r", encoding="utf-8") as f:
@@ -183,4 +244,4 @@ def generate_summary(reports_dir):
     summary_lines.append("  - Обновите конфигурацию для устранения ошибок pylint и безопасности.")
     summary_lines.append("  - Расширьте модульное тестирование для повышения покрытия кода.")
     
-    return "\n".join(summary_lines)
+    return "\n".join(summary_lines), metrics

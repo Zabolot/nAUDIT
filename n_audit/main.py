@@ -10,6 +10,9 @@ def parse_args():
     parser.add_argument("--exclude", help="Исключить файлы или директории", nargs="*", default=[])
     parser.add_argument("--report-level", help="Уровень отчёта: brief, full или detailed", 
                         choices=["brief", "full", "detailed"], default="full")
+    parser.add_argument("--export-format", help="Формат отчёта: html или json", 
+                        choices=["html", "json"], default="html")
+    parser.add_argument("--verbose", help="Включить подробный режим логирования", action="store_true")
     return parser.parse_args()
 
 def main():

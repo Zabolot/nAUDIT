@@ -1,6 +1,8 @@
 import os
-from n_audit import code_analysis, security, tests_analysis, infrastructure, visualizations, recommendations, utils
+from n_audit import code_analysis, security, tests_analysis, infrastructure, recommendations, utils
 import json
+
+from . import visualizations
 
 RESULTS_DIR = "audit_results"
 REPORTS_DIR = os.path.join(RESULTS_DIR, "reports")

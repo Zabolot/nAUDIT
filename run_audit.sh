@@ -20,14 +20,14 @@ mkdir -p project_report
 # Выполняем аудиторские проверки
 tree -a -I 'v.naudit|__pycache__' -o project_report/structure.txt
 pip freeze > project_report/requirements.txt
-flake8 bot/ > project_report/style_issues.txt
-pylint bot/ --output=project_report/pylint_report.txt
-mypy bot/ --strict > project_report/type_checks.txt
-bandit -r bot/ -f txt -o project_report/security_issues.txt
+flake8 > project_report/style_issues.txt
+pylint --output=project_report/pylint_report.txt
+mypy --strict > project_report/type_checks.txt
+bandit -r -f txt -o project_report/security_issues.txt
 alembic history > project_report/alembic_history.txt
-pytest --cov=bot --cov-report=html:project_report/coverage tests/
-radon cc bot/ -a -O project_report/complexity.txt
-radon mi bot/ -O project_report/maintainability.txt
+pytest --cov-report=html:project_report/coverage tests/
+radon cc -a -O project_report/complexity.txt
+radon mi -O project_report/maintainability.txt
 pipdeptree --graph-output png > project_report/dependencies.png
 
 # Архивировать результаты

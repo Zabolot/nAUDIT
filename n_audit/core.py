@@ -1,5 +1,6 @@
 import os
 import json
+import importlib
 
 from n_audit import code_analysis, security, tests_analysis, infrastructure, recommendations, utils
 from . import visualizations
@@ -11,6 +12,25 @@ CONFIGS_DIR = os.path.join(RESULTS_DIR, "configs")
 def setup_directories():
     os.makedirs(REPORTS_DIR, exist_ok=True)
     os.makedirs(CONFIGS_DIR, exist_ok=True)
+
+def load_plugins():
+    """
+    Загружает дополнительные плагины из папки n_audit/plugins.
+    Каждый плагин должен реализовывать функцию run_plugin_checks(args, reports_dir).
+    """
+    plugins = []
+    plugins_dir = os.path.join(os.path.dirname(__file__), "plugins")
+    if os.path.exists(plugins_dir):
+        for filename in os.listdir(plugins_dir):
+            if filename.endswith(".py") and filename != "__init__.py":
+                module_name = filename[:-3]
+                try:
+                    mod = importlib.import_module(f"n_audit.plugins.{module_name}")
+                    if hasattr(mod, "run_plugin_checks"):
+                        plugins.append(mod)
+                except Exception as e:
+                    print(f"[WARNING] Не удалось загрузить плагин {module_name}: {e}")
+    return plugins
 
 def run_all_checks(args):
     if args.verbose:
@@ -28,6 +48,9 @@ def run_all_checks(args):
         if not utils.check_command(cmd):
             print(f"[WARNING] Не найдена утилита '{cmd}'. Рекомендуется установить её через пакетный менеджер системы.")
     
+    # Определение директории для анализа. Если не указано, анализируется текущая директория.
+    target = args.module if args.module else "."
+    
     # Запуск модулей анализа с обновлением анимации
     code_analysis.run(args, REPORTS_DIR)
     visualizations.display_cat_animation(20)
@@ -43,6 +66,14 @@ def run_all_checks(args):
     
     visualizations.generate_visualizations(REPORTS_DIR)
     visualizations.display_cat_animation(90)
+    
+    # Запуск плагинов (если имеются). Плагины могут добавлять дополнительные проверки и визуализации.
+    plugins = load_plugins()
+    for plugin in plugins:
+        try:
+            plugin.run_plugin_checks(args, REPORTS_DIR)
+        except Exception as e:
+            print(f"[ERROR] Плагин {plugin.__name__} завершился с ошибкой: {e}")
     
     # Генерация рекомендаций
     recs = recommendations.generate_advices(REPORTS_DIR)
@@ -103,7 +134,6 @@ def generate_summary(reports_dir):
       - Рекомендации по дальнейшим действиям
     """
     summary_lines = []
-    
     # Считаем ошибки из pylint_report.log
     pylint_log = os.path.join(reports_dir, "pylint_report.log")
     error_count = 0
@@ -113,9 +143,8 @@ def generate_summary(reports_dir):
             for line in f:
                 if "ERROR" in line or "F0001" in line:
                     error_count += 1
-                    # Пытаемся извлечь имя модуля из строки лога
                     parts = line.split()
-                    if parts:
+                    if len(parts) >= 2:
                         problem_modules.add(parts[1])
     summary_lines.append(f"Ошибок в pylint: {error_count}")
     if problem_modules:
@@ -123,7 +152,7 @@ def generate_summary(reports_dir):
     else:
         summary_lines.append("Проблемные модули не выявлены.")
     
-    # Можно добавить сводку по безопасности (например, ошибки bandit)
+    # Сводка по безопасности (например, ошибки bandit/safety)
     security_file = os.path.join(reports_dir, "security_issues.json")
     sec_errors = 0
     if os.path.exists(security_file):
@@ -136,7 +165,7 @@ def generate_summary(reports_dir):
             pass
     summary_lines.append(f"Ошибок в безопасности (bandit/safety): {sec_errors}")
     
-    # Добавляем данные из других логов по необходимости (например, cyclomatic_complexity.log)
+    # Сводка по сложности кода из cyclomatic_complexity.log
     complexity_log = os.path.join(reports_dir, "cyclomatic_complexity.log")
     if os.path.exists(complexity_log):
         with open(complexity_log, "r", encoding="utf-8") as f:
@@ -149,7 +178,6 @@ def generate_summary(reports_dir):
     else:
         summary_lines.append("Файл с цикломатической сложностью не найден.")
     
-    # Итоговая рекомендация по улучшению
     summary_lines.append("\nРекомендации:")
     summary_lines.append("  - Проверьте указанные проблемные места.")
     summary_lines.append("  - Обновите конфигурацию для устранения ошибок pylint и безопасности.")

@@ -32,6 +32,9 @@ pip install -e .
 python3 -m venv venv
 source venv/bin/activate
 ```
+# – Установите кодовую страницу PowerShell в UTF‑8 командой:
+chcp 65001
+
 ## Запуск
 
 ### На Windows
@@ -52,11 +55,11 @@ source venv/bin/activate
 Для Linux можно использовать bash-скрипт `run_audit.ps1.sh`:
 1. Сделайте скрипт исполняемым:
    ```
-   chmod +x run_audit.ps1.sh
+   chmod +x run_audit.sh
    ```
 2. Запустите скрипт:
    ```
-   ./run_audit.ps1.sh
+   ./run_audit.sh
    ```
    Скрипт создаст виртуальное окружение (если его нет), активирует его, выполнит аудит, затем деактивирует виртуальное окружение.
 

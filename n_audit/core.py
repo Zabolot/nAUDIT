@@ -1,7 +1,7 @@
 import os
-from n_audit import code_analysis, security, tests_analysis, infrastructure, recommendations, utils
 import json
 
+from n_audit import code_analysis, security, tests_analysis, infrastructure, recommendations, utils
 from . import visualizations
 
 RESULTS_DIR = "audit_results"
@@ -46,14 +46,11 @@ def run_all_checks(args):
     
     # Генерация рекомендаций
     recs = recommendations.generate_advices(REPORTS_DIR)
+    # Генерация итогового отчета и вывод сводки
     generate_report(args.report_level, args.export_format, REPORTS_DIR, recs, args.verbose)
-    
-    # Финальная анимация - полный прогресс
-    visualizations.display_cat_animation(100)
-    print(f"[*] Отчёт аудита сформирован. Результаты сохранены в папке {RESULTS_DIR}")
 
 def generate_report(report_level, export_format, reports_dir, recommendations_text, verbose):
-    report_path = os.path.join(reports_dir, "full_report.md")
+    summary = generate_summary(reports_dir)
     if export_format == "html":
         content = (
             "<html><head><meta charset='utf-8'><title>Отчёт аудита nAUDIT</title></head><body>\n"
@@ -71,18 +68,10 @@ def generate_report(report_level, export_format, reports_dir, recommendations_te
         content += (
             "<h2>Рекомендации по улучшению проекта</h2>\n"
             f"<p>{recommendations_text.replace(chr(10), '<br>')}</p>\n"
+            "<h2>Сводка аудита</h2>\n"
+            f"<pre>{summary}</pre>\n"
+            "</body></html>"
         )
-        if report_level == "detailed":
-            content += (
-                "<h2>Дополнительные советы для начинающих</h2>\n"
-                "<ul>\n"
-                "<li>Используйте виртуальные окружения для каждого проекта</li>\n"
-                "<li>Регулярно проводите статический анализ кода</li>\n"
-                "<li>Следуйте стандартам PEP8</li>\n"
-                "<li>Пишите тесты для каждого функционального блока</li>\n"
-                "</ul>\n"
-            )
-        content += "</body></html>"
         report_path = os.path.join(reports_dir, "full_report.html")
         with open(report_path, "w", encoding="utf-8") as f:
             f.write(content)
@@ -91,12 +80,7 @@ def generate_report(report_level, export_format, reports_dir, recommendations_te
     else:  # JSON-отчёт
         report_data = {
             "title": "Отчёт аудита nAUDIT",
-            "metrics": {
-                "static_analysis": "завершён",
-                "security_check": "проведена",
-                "tests_analysis": "выполнен",
-                "infrastructure_check": "выполнена"
-            },
+            "metrics": summary,
             "recommendations": recommendations_text,
             "details": "Содержимое логов анализа см. в папке с отчётом."
         }
@@ -105,3 +89,70 @@ def generate_report(report_level, export_format, reports_dir, recommendations_te
             json.dump(report_data, f, ensure_ascii=False, indent=2)
         if verbose:
             print(f"[VERBOSE] JSON отчёт сформирован: {report_path}")
+    
+    # Вывод сводки в терминал
+    print("\n[*] Итоговая сводка аудита:")
+    print(summary)
+
+def generate_summary(reports_dir):
+    """
+    Формирует сводку аудита по итогам логов.
+    Сканирует файлы с логами и возвращает краткую статистику:
+      - Количество найденных ошибок (например, из pylint_report.log)
+      - Проблемные модули (на основе наличия ошибок)
+      - Рекомендации по дальнейшим действиям
+    """
+    summary_lines = []
+    
+    # Считаем ошибки из pylint_report.log
+    pylint_log = os.path.join(reports_dir, "pylint_report.log")
+    error_count = 0
+    problem_modules = set()
+    if os.path.exists(pylint_log):
+        with open(pylint_log, "r", encoding="utf-8") as f:
+            for line in f:
+                if "ERROR" in line or "F0001" in line:
+                    error_count += 1
+                    # Пытаемся извлечь имя модуля из строки лога
+                    parts = line.split()
+                    if parts:
+                        problem_modules.add(parts[1])
+    summary_lines.append(f"Ошибок в pylint: {error_count}")
+    if problem_modules:
+        summary_lines.append("Проблемные модули/файлы: " + ", ".join(problem_modules))
+    else:
+        summary_lines.append("Проблемные модули не выявлены.")
+    
+    # Можно добавить сводку по безопасности (например, ошибки bandit)
+    security_file = os.path.join(reports_dir, "security_issues.json")
+    sec_errors = 0
+    if os.path.exists(security_file):
+        try:
+            with open(security_file, "r", encoding="utf-8") as f:
+                sec_data = json.load(f)
+                if "errors" in sec_data:
+                    sec_errors = len(sec_data["errors"])
+        except Exception:
+            pass
+    summary_lines.append(f"Ошибок в безопасности (bandit/safety): {sec_errors}")
+    
+    # Добавляем данные из других логов по необходимости (например, cyclomatic_complexity.log)
+    complexity_log = os.path.join(reports_dir, "cyclomatic_complexity.log")
+    if os.path.exists(complexity_log):
+        with open(complexity_log, "r", encoding="utf-8") as f:
+            complexity_content = f.read().strip()
+        if complexity_content:
+            summary_lines.append("Замечания по сложности кода:")
+            summary_lines.append(complexity_content)
+        else:
+            summary_lines.append("Анализ цикломатической сложности не выявил критических участков.")
+    else:
+        summary_lines.append("Файл с цикломатической сложностью не найден.")
+    
+    # Итоговая рекомендация по улучшению
+    summary_lines.append("\nРекомендации:")
+    summary_lines.append("  - Проверьте указанные проблемные места.")
+    summary_lines.append("  - Обновите конфигурацию для устранения ошибок pylint и безопасности.")
+    summary_lines.append("  - Расширьте модульное тестирование для повышения покрытия кода.")
+    
+    return "\n".join(summary_lines)

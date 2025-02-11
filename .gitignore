@@ -1,0 +1,20 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+venv/
+.audit_venv/
+
+# Audit результаты
+audit_results/
+
+# IDE файлы
+.vscode/
+*.swp

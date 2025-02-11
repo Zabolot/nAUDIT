@@ -1,5 +1,6 @@
 import os
 from n_audit import code_analysis, security, tests_analysis, infrastructure, visualizations, recommendations, utils
+import json
 
 RESULTS_DIR = "audit_results"
 REPORTS_DIR = os.path.join(RESULTS_DIR, "reports")
@@ -10,7 +11,10 @@ def setup_directories():
     os.makedirs(CONFIGS_DIR, exist_ok=True)
 
 def run_all_checks(args):
-    print("[*] Инициализация аудита")
+    if args.verbose:
+        print("[VERBOSE] Запуск полного аудита проекта.")
+    else:
+        print("[*] Инициализация аудита")
     setup_directories()
     
     # Вывод стартовой анимации (0%)
@@ -40,37 +44,62 @@ def run_all_checks(args):
     
     # Генерация рекомендаций
     recs = recommendations.generate_advices(REPORTS_DIR)
-    generate_report(args.report_level, REPORTS_DIR, recs)
+    generate_report(args.report_level, args.export_format, REPORTS_DIR, recs, args.verbose)
     
     # Финальная анимация - полный прогресс
     visualizations.display_cat_animation(100)
     print(f"[*] Отчёт аудита сформирован. Результаты сохранены в папке {RESULTS_DIR}")
 
-def generate_report(report_level, reports_dir, recommendations_text):
-    report_path = f"{reports_dir}/full_report.md"
-    with open(report_path, "w", encoding="utf-8") as f:
-        f.write("# Отчёт аудита nAUDIT\n\n")
-        f.write("## Основные метрики\n")
-        f.write("- Статический анализ кода завершён\n")
-        f.write("- Проверка безопасности проведена\n")
-        f.write("- Анализ тестового покрытия выполнен\n")
-        f.write("- Проверка инфраструктуры выполнена\n\n")
-        
+def generate_report(report_level, export_format, reports_dir, recommendations_text, verbose):
+    report_path = os.path.join(reports_dir, "full_report.md")
+    if export_format == "html":
+        content = (
+            "<html><head><meta charset='utf-8'><title>Отчёт аудита nAUDIT</title></head><body>\n"
+            "<h1>Отчёт аудита nAUDIT</h1>\n"
+            "<h2>Основные метрики</h2>\n"
+            "<ul>\n"
+            "<li>Статический анализ кода завершён</li>\n"
+            "<li>Проверка безопасности проведена</li>\n"
+            "<li>Анализ тестового покрытия выполнен</li>\n"
+            "<li>Проверка инфраструктуры выполнена</li>\n"
+            "</ul>\n"
+        )
         if report_level in ("full", "detailed"):
-            f.write("## Детализированный отчёт\n")
-            f.write("- Результаты radon, pylint, mypy, flake8 и inspect4py сохранены в отчётных файлах\n")
-            f.write("- Выявленные уязвимости и рекомендации по безопасности опубликованы\n")
-            f.write("- Анализ тестового покрытия с pytest и coverage сохранён\n")
-            f.write("- Результаты проверки Docker, sqlfluff и окружения сохранены\n\n")
-        
-        f.write("## Рекомендации по улучшению проекта\n")
-        f.write(recommendations_text)
-        
+            content += "<h2>Детализированный отчёт</h2>\n<p>Содержимое логов анализа см. в отдельных файлах.</p>\n"
+        content += (
+            "<h2>Рекомендации по улучшению проекта</h2>\n"
+            f"<p>{recommendations_text.replace(chr(10), '<br>')}</p>\n"
+        )
         if report_level == "detailed":
-            f.write("\n## Дополнительные советы для начинающих\n")
-            f.write(
-                "- Используйте виртуальные окружения для каждого проекта\n"
-                "- Регулярно запускайте статический анализ кода для выявления ошибок\n"
-                "- Следуйте рекомендациям по PEP8 и другим стандартам\n"
-                "- Пишите тесты для каждого функционального блока и проверяйте покрытие\n"
+            content += (
+                "<h2>Дополнительные советы для начинающих</h2>\n"
+                "<ul>\n"
+                "<li>Используйте виртуальные окружения для каждого проекта</li>\n"
+                "<li>Регулярно проводите статический анализ кода</li>\n"
+                "<li>Следуйте стандартам PEP8</li>\n"
+                "<li>Пишите тесты для каждого функционального блока</li>\n"
+                "</ul>\n"
             )
+        content += "</body></html>"
+        report_path = os.path.join(reports_dir, "full_report.html")
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        if verbose:
+            print(f"[VERBOSE] HTML отчёт сформирован: {report_path}")
+    else:  # JSON-отчёт
+        report_data = {
+            "title": "Отчёт аудита nAUDIT",
+            "metrics": {
+                "static_analysis": "завершён",
+                "security_check": "проведена",
+                "tests_analysis": "выполнен",
+                "infrastructure_check": "выполнена"
+            },
+            "recommendations": recommendations_text,
+            "details": "Содержимое логов анализа см. в папке с отчётом."
+        }
+        report_path = os.path.join(reports_dir, "full_report.json")
+        with open(report_path, "w", encoding="utf-8") as f:
+            json.dump(report_data, f, ensure_ascii=False, indent=2)
+        if verbose:
+            print(f"[VERBOSE] JSON отчёт сформирован: {report_path}")

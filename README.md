@@ -23,9 +23,15 @@ pip install nAUDIT
 ```bash
 git clone https://github.com/your_username/nAUDIT.git
 cd nAUDIT
-pip install .
+pip install -e .
 ```
-
+Создайте и активируйте виртуальное окружение:
+Если не хотите устанавливать пакет глобально.
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -e .
+```
 ## Использование
 
 После установки инструмент доступен через консольную команду:
@@ -36,6 +42,11 @@ naudit [options]
 Например:
 ```bash
 naudit --module bot.core --exclude tests
+```
+
+Если команда не находится, воспользуйтесь запуском через модуль:
+```bash
+python -m n_audit.main --module bot.core --exclude tests
 ```
 
 Если отсутствуют внешние утилиты, скрипт выведет рекомендации по их установке.

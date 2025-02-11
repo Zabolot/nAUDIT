@@ -1,5 +1,6 @@
 import os
 import time
+import math
 
 def generate_visualizations(reports_dir):
     print("[*] Генерация визуализаций...")
@@ -22,11 +23,12 @@ def generate_visualizations(reports_dir):
 
 def display_cat_animation(progress):
     """
-    Вывод анимации большого кота с эффектом заполнения сверху вниз.
-    progress: целое число от 0 до 100.
+    Плавное появление кота из ничего в одном месте с лёгкой анимацией движения.
+    При каждом обновлении предыдущий кадр стирается.
+    Аргумент progress: целое число от 0 до 100, влияющее на степень появления кота и динамику.
     """
-    # ASCII-арт большого кота
-    cat_art = [
+    # Базовый ASCII-арт кота (10 строк)
+    base_cat = [
         "               /\\     /\\",
         "              {  `---'  }",
         "              {  O   O  }",
@@ -39,23 +41,32 @@ def display_cat_animation(progress):
         "                \\__/  /(_/     \\__/",
         "                  (__/"
     ]
-    total_lines = len(cat_art)
-    filled_count = int(total_lines * progress / 100)
+    total_lines = len(base_cat)
+    # Определяем количество отображаемых строк в зависимости от progress
+    visible_lines = int(total_lines * progress / 100)
+    if visible_lines < 1:
+        visible_lines = 1
     
-    # Формирование нового изображения: первые filled_count строк заменяем на заполнённые блоком
-    filled_cat = []
-    for i, line in enumerate(cat_art):
-        if i < filled_count:
-            # Создаем строку заполненную блоками той же длины, сохраняя отступы
-            indent = len(line) - len(line.lstrip())
-            filled_line = " " * indent + "█" * (len(line.lstrip()))
-            filled_cat.append(filled_line)
-        else:
-            filled_cat.append(line)
+    # Лёгкая анимация движения: смещение по горизонтали (значение осциллирует)
+    horizontal_offset = int(3 + 3 * math.sin(math.radians(progress * 4)))
+    offset_str = " " * horizontal_offset
+
+    # Эффект смены деталей: пусть каждые 10% progress меняется вариант "глаз"
+    if (progress // 10) % 2 == 0:
+        cat_variant = base_cat.copy()
+        # Меняем символы глаз
+        cat_variant[2] = "              {  o   o  }"
+    else:
+        cat_variant = base_cat.copy()
+
+    # Очищаем экран (ANSI escape последовательность) и выводим обновлённый кадр анимации
+    print("\033[H\033[J", end="")  # очистка экрана
+    for i in range(visible_lines):
+        print(offset_str + cat_variant[i])
     
-    # Очищаем экран и выводим изображение
-    print("\033[H\033[J", end="")  # ANSI-очистка экрана
-    for line in filled_cat:
-        print(line)
-    print(f"\nПрогресс аудита: {progress}%")
-    time.sleep(0.5)  # задержка для наглядности
+    # Прогресс-бар
+    bar_width = 40
+    filled = int(bar_width * progress / 100)
+    bar = '█' * filled + '▒' * (bar_width - filled)
+    print(f"\nПрогресс аудита: [{bar}] {progress}%")
+    time.sleep(0.3)

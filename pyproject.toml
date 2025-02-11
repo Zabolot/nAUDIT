@@ -1,5 +1,17 @@
-[build-system] requires = ["setuptools", "wheel"] build-backend = "setuptools.build_meta"
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
 
-[project] name = "nAUDIT" version = "1.0.0" description = "Глубокий анализ и аудит Python проектов" readme = "README.md" authors = [ { name="Ваше имя", email="email@example.com" } ] dependencies = [ "pydantic", "coverage", "pytest", "radon", "bandit", "safety", "pipdeptree", "sqlfluff", "cyclonedx-py", "networkx", "pyvis", "matplotlib", "dependency-injector" ]
+[project]
+name = "nAUDIT"
+version = "1.0.0"
+description = "Инструмент глубокого анализа и аудита Python проектов"
+readme = "README.md"
+authors = [ { name = "Ваше имя", email = "email@example.com" } ]
+dependencies = [
+    "pydantic", "coverage", "pytest", "radon", "bandit", "safety", "pipdeptree", 
+    "sqlfluff", "cyclonedx-py", "networkx", "pyvis", "matplotlib", "dependency-injector"
+]
 
-[project.scripts] naudit = "n_audit.main:main"
+[project.scripts]
+naudit = "n_audit.main:main"

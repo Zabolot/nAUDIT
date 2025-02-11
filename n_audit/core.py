@@ -12,26 +12,38 @@ def setup_directories():
 def run_all_checks(args):
     print("[*] Инициализация аудита")
     setup_directories()
-
+    
+    # Вывод стартовой анимации (0%)
+    visualizations.display_cat_animation(0)
+    
     # Проверка наличия внешних команд
     external_cmds = ["dot", "inspect4py", "safety", "gitleaks", "ag", "sqlfluff", "cyclonedx-py"]
     for cmd in external_cmds:
         if not utils.check_command(cmd):
             print(f"[WARNING] Не найдена утилита '{cmd}'. Рекомендуется установить её через пакетный менеджер системы.")
-
-    # Запуск модулей анализа
+    
+    # Запуск модулей анализа с обновлением анимации
     code_analysis.run(args, REPORTS_DIR)
+    visualizations.display_cat_animation(20)
+    
     security.run(args, REPORTS_DIR)
+    visualizations.display_cat_animation(40)
+    
     tests_analysis.run(args, REPORTS_DIR)
+    visualizations.display_cat_animation(60)
+    
     infrastructure.run(args, REPORTS_DIR, CONFIGS_DIR)
+    visualizations.display_cat_animation(80)
+    
     visualizations.generate_visualizations(REPORTS_DIR)
+    visualizations.display_cat_animation(90)
     
-    # Генерация рекомендаций для улучшения кода и проекта
+    # Генерация рекомендаций
     recs = recommendations.generate_advices(REPORTS_DIR)
-    
-    # Формирование итогового отчёта с учётом выбранного уровня детализации
     generate_report(args.report_level, REPORTS_DIR, recs)
     
+    # Финальная анимация - полный прогресс
+    visualizations.display_cat_animation(100)
     print(f"[*] Отчёт аудита сформирован. Результаты сохранены в папке {RESULTS_DIR}")
 
 def generate_report(report_level, reports_dir, recommendations_text):

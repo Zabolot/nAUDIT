@@ -4,17 +4,33 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nAUDIT"
-version = "1.0.0"
-description = "Инструмент глубокого анализа и аудита Python проектов"
+version = "2.0.0"
+description = "Инструмент глубокого анализа и аудита Python проектов с графическим интерфейсом"
 readme = "README.md"
 authors = [ { name = "Ваше имя", email = "email@example.com" } ]
 dependencies = [
-    "pydantic", "coverage", "pytest", "radon", "bandit", "safety", "pipdeptree", 
-    "sqlfluff", "cyclonedx-py", "networkx", "pyvis", "matplotlib", "dependency-injector"
+    "pydantic>=2.0",
+    "coverage>=7.0",
+    "pytest>=7.0",
+    "radon>=6.0",
+    "bandit>=1.8",
+    "safety>=2.0",
+    "pipdeptree>=3.0",
+    "sqlfluff>=2.0",
+    "cyclonedx-py>=4.0",
+    "networkx>=3.0",
+    "pyvis>=0.3",
+    "matplotlib>=3.5",
+    "dependency-injector>=4.40",
+    "PyQt6>=6.0",
+    "PyInstaller>=6.0",
+    "python-dotenv>=1.0",
+    "requests>=2.28"
 ]
 
 [project.scripts]
 naudit = "n_audit.main:main"
+naudit-gui = "n_audit.gui.main_app:main"
 
 [tool.setuptools.packages.find]
 exclude = ["Trash", "Trash.*"]

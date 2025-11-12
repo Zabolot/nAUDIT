@@ -1,0 +1,15 @@
+pydantic>=2.0
+coverage>=7.0
+pytest>=7.0
+radon>=6.0
+bandit>=1.8
+safety>=2.0
+sqlfluff>=2.0
+networkx>=3.0
+pyvis>=0.3
+matplotlib>=3.5
+dependency-injector>=4.40
+PyQt6>=6.0
+PyInstaller>=6.0
+python-dotenv>=1.0
+requests>=2.28

@@ -1,8 +1,10 @@
-# nAUDIT 2.0
+# nAUDIT 2.1
 
 **Профессиональный инструмент для комплексного анализа качества кода Python проектов**
 
-![nAUDIT GUI](https://img.shields.io/badge/UI-PyQt6-blue) ![Python](https://img.shields.io/badge/Python-3.8+-green) ![License](https://img.shields.io/badge/License-MIT-yellow)
+> ✨ **v2.1:** Реальный анализ кода, работающий экспорт, улучшенный интерфейс, визуализация результатов
+
+![nAUDIT GUI](https://img.shields.io/badge/UI-PyQt6-blue) ![Python](https://img.shields.io/badge/Python-3.12-green) ![Status](https://img.shields.io/badge/Status-Production-brightgreen) ![Build](https://img.shields.io/badge/Build-130MB-orange)
 
 ## 🎯 Возможности
 

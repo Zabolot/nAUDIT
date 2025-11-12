@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Финальный скрипт сборки nAUDIT.exe - МИНИМАЛЬНЫЙ И НАДЕЖНЫЙ.
-Решает все проблемы с ModuleNotFoundError используя только необходимые параметры.
+Скрипт сборки nAUDIT v2.1.exe с УЛУЧШЕНИЯМИ.
+Включает все компоненты для работающего анализа и красивого интерфейса.
 """
 
 import os
@@ -16,28 +16,29 @@ def main():
     os.chdir(project_root)
     
     print("=" * 70)
-    print("[*] nAUDIT - FINAL EXECUTABLE BUILD")
+    print("[*] nAUDIT v2.1 - СБОРКА УЛУЧШЕННОГО .EXE")
     print("=" * 70)
     
     # Очистка старых сборок
-    print("\n[1/3] Cleaning old builds...")
+    print("\n[1/3] Очистка старых сборок...")
     for path in ["build", "dist"]:
         if (project_root / path).exists():
             shutil.rmtree(project_root / path)
-            print(f"   OK Deleted: {path}/")
+            print(f"   ✓ Удален: {path}/")
     
     for spec_file in project_root.glob("*.spec"):
         spec_file.unlink()
-        print(f"   OK Deleted: {spec_file.name}")
+        print(f"   ✓ Удален: {spec_file.name}")
     
-    # Сборка - САМЫЙ ПРОСТОЙ И НАДЕЖНЫЙ СПОСОБ
-    print("\n[2/3] Building application (takes 1-2 minutes)...")
-    print("   Using: PyInstaller with --collect-all")
-    print("   Parameters:")
-    print("     * --onefile (single file)")
-    print("     * --windowed (no console)")
-    print("     * --collect-all=n_audit (all modules)")
-    print("     * --collect-all=PyQt6 (all Qt6 libraries)")
+    # Сборка - ВСЕ НЕОБХОДИМЫЕ МОДУЛИ
+    print("\n[2/3] Сборка приложения (2-3 минуты)...")
+    print("   Используется: PyInstaller с --collect-all")
+    print("   Параметры:")
+    print("     • --onefile (один файл)")
+    print("     • --windowed (без консоли)")
+    print("     • --collect-all=n_audit (все модули анализа)")
+    print("     • --collect-all=PyQt6 (все компоненты PyQt6)")
+    print("     • --collect-all=matplotlib (графики)")
     print()
     
     cmd = [
@@ -48,35 +49,40 @@ def main():
         "--name=nAUDIT",
         "--collect-all=n_audit",
         "--collect-all=PyQt6",
+        "--collect-all=matplotlib",
         str(project_root / "n_audit" / "gui" / "main_app.py")
     ]
     
     result = subprocess.run(cmd, cwd=project_root)
     
     if result.returncode != 0:
-        print("\n[ERROR] Build failed!")
+        print("\n[✗] Сборка не удалась!")
         sys.exit(1)
     
     # Проверка результата
-    print("\n[3/3] Verifying result...")
+    print("\n[3/3] Проверка результата...")
     exe_file = project_root / "dist" / "nAUDIT.exe"
     
     if exe_file.exists():
         size_mb = exe_file.stat().st_size / (1024 * 1024)
-        print(f"   OK File created: {exe_file}")
-        print(f"   OK Size: {size_mb:.1f} MB")
+        print(f"   ✓ Файл создан: {exe_file}")
+        print(f"   ✓ Размер: {size_mb:.1f} МБ")
     else:
-        print(f"   ERROR File not found: {exe_file}")
+        print(f"   ✗ Файл не найден: {exe_file}")
         sys.exit(1)
     
     # Итоги
     print("\n" + "=" * 70)
-    print("[SUCCESS] Build completed successfully!")
+    print("[SUCCESS] Сборка v2.1 завершена успешно!")
     print("=" * 70)
-    print(f"\nExecutable: {exe_file}")
-    print(f"\nYou can now run the application:")
+    print(f"\nПриложение: {exe_file}")
+    print(f"\nУлучшения v2.1:")
+    print("   ✓ Реальный анализ кода (не фейковые результаты)")
+    print("   ✓ Работающий экспорт (JSON + HTML)")
+    print("   ✓ Улучшенный интерфейс с прогрессом")
+    print("   ✓ Визуализация результатов")
+    print(f"\nЗапуск:")
     print(f"   {exe_file}")
-    print(f"\nOr share it with users - no dependencies required!")
     print()
 
 

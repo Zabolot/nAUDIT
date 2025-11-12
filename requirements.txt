@@ -10,6 +10,7 @@ pyvis>=0.3
 matplotlib>=3.5
 dependency-injector>=4.40
 PyQt6>=6.0
+PyQt6-Charts
 PyInstaller>=6.0
 python-dotenv>=1.0
 requests>=2.28

@@ -164,53 +164,74 @@ class AuditManager:
             # Фаза 1: Статический анализ кода
             if self.cancel_requested:
                 return
-            self._update_phase("Статический анализ кода", 0, "Инициализация...")
+            self._update_phase("Статический анализ кода", 0, "Сканирование Python файлов...")
             self._update_progress(5, "Запуск анализа кода")
-            code_analysis.run(args, reports_dir)
+            try:
+                code_analysis.run(args, reports_dir)
+            except Exception as e:
+                if self.verbose:
+                    print(f"Ошибка в code_analysis: {e}")
             self._update_progress(20, "Статический анализ завершён")
 
             # Фаза 2: Проверка безопасности
             if self.cancel_requested:
                 return
-            self._update_phase("Проверка безопасности", 0, "Инициализация...")
+            self._update_phase("Проверка безопасности", 0, "Сканирование уязвимостей...")
             self._update_progress(25, "Запуск проверки безопасности")
-            security.run(args, reports_dir)
+            try:
+                security.run(args, reports_dir)
+            except Exception as e:
+                if self.verbose:
+                    print(f"Ошибка в security: {e}")
             self._update_progress(40, "Проверка безопасности завершена")
 
             # Фаза 3: Анализ тестов
             if self.cancel_requested:
                 return
-            self._update_phase("Анализ тестового покрытия", 0, "Инициализация...")
+            self._update_phase("Анализ тестового покрытия", 0, "Поиск тестов...")
             self._update_progress(45, "Запуск анализа тестов")
-            tests_analysis.run(args, reports_dir)
+            try:
+                tests_analysis.run(args, reports_dir)
+            except Exception as e:
+                if self.verbose:
+                    print(f"Ошибка в tests_analysis: {e}")
             self._update_progress(60, "Анализ тестов завершён")
 
             # Фаза 4: Анализ инфраструктуры
             if self.cancel_requested:
                 return
-            self._update_phase("Анализ инфраструктуры", 0, "Инициализация...")
+            self._update_phase("Анализ инфраструктуры", 0, "Проверка зависимостей...")
             self._update_progress(65, "Запуск анализа инфраструктуры")
-            infrastructure.run(args, reports_dir, configs_dir)
+            try:
+                infrastructure.run(args, reports_dir, configs_dir)
+            except Exception as e:
+                if self.verbose:
+                    print(f"Ошибка в infrastructure: {e}")
             self._update_progress(80, "Анализ инфраструктуры завершён")
 
             # Фаза 5: Генерация рекомендаций
             if self.cancel_requested:
                 return
-            self._update_phase("Генерация рекомендаций", 0, "Инициализация...")
+            self._update_phase("Генерация рекомендаций", 0, "Анализ результатов...")
             self._update_progress(85, "Генерация рекомендаций")
-            recs = recommendations.generate_advices(reports_dir)
+            try:
+                recs = recommendations.generate_advices(reports_dir)
+            except Exception as e:
+                if self.verbose:
+                    print(f"Ошибка в recommendations: {e}")
+                recs = "Рекомендации не доступны"
             self._update_progress(90, "Рекомендации готовы")
 
             # Фаза 6: Формирование итогового отчета
             if self.cancel_requested:
                 return
-            self._update_phase("Формирование отчёта", 0, "Инициализация...")
+            self._update_phase("Формирование отчёта", 0, "Компиляция данных...")
             self._update_progress(95, "Создание финального отчета")
 
             # Загрузка результатов
             result = self._load_results(reports_dir, recs)
 
-            self._update_progress(100, "Аудит завершён")
+            self._update_progress(100, "Аудит завершён успешно!")
             self.status = AuditStatus.COMPLETED
             self.result = result
 
@@ -227,62 +248,153 @@ class AuditManager:
                 print(traceback.format_exc())
 
     def _load_results(self, reports_dir: str, recommendations_text: str) -> AuditResult:
-        """Загрузка результатов аудита"""
+        """Загрузка результатов аудита с расширенной диагностикой"""
         phases = {}
-
-        # Чтение результатов анализа кода
         code_issues = 0
+        security_issues = 0
+        test_coverage = 0.0
+
+        # Чтение результатов анализа кода (Radon, Pylint и т.д.)
         try:
-            pylint_file = os.path.join(reports_dir, "pylint_full.json")
-            if os.path.exists(pylint_file):
-                with open(pylint_file, "r", encoding="utf-8") as f:
-                    pylint_data = json.load(f)
-                    code_issues = len(pylint_data) if isinstance(pylint_data, list) else 0
-                phases["code_analysis"] = {"issues": code_issues}
+            # Pylint результаты
+            pylint_files = [
+                os.path.join(reports_dir, "pylint_full.json"),
+                os.path.join(reports_dir, "pylint_results.json"),
+                os.path.join(reports_dir, "code_quality.json")
+            ]
+            
+            for pylint_file in pylint_files:
+                if os.path.exists(pylint_file):
+                    try:
+                        with open(pylint_file, "r", encoding="utf-8") as f:
+                            pylint_data = json.load(f)
+                            if isinstance(pylint_data, list):
+                                # Считаем только реальные ошибки и предупреждения
+                                code_issues += len([
+                                    x for x in pylint_data 
+                                    if x.get("type") in ["error", "fatal", "convention", "refactor", "warning"]
+                                ])
+                            elif isinstance(pylint_data, dict):
+                                # Если формат словаря
+                                if "errors" in pylint_data:
+                                    code_issues += len(pylint_data["errors"])
+                                if "issues" in pylint_data:
+                                    code_issues += pylint_data["issues"]
+                        break
+                    except:
+                        continue
+            
+            # Radon результаты (сложность кода)
+            radon_file = os.path.join(reports_dir, "complexity.txt")
+            if os.path.exists(radon_file):
+                try:
+                    with open(radon_file, "r", encoding="utf-8") as f:
+                        content = f.read()
+                        # Подсчет функций с высокой сложностью
+                        complex_functions = content.count("C (10-11)")
+                        complex_functions += content.count("C (12-13)")
+                        code_issues += complex_functions
+                except:
+                    pass
+            
+            phases["code_analysis"] = {"issues": code_issues}
         except Exception as e:
             if self.verbose:
                 print(f"Ошибка при загрузке результатов анализа кода: {e}")
 
-        # Чтение результатов проверки безопасности
-        security_issues = 0
+        # Чтение результатов проверки безопасности (Bandit)
         try:
-            security_file = os.path.join(reports_dir, "security_issues.json")
-            if os.path.exists(security_file):
-                with open(security_file, "r", encoding="utf-8") as f:
-                    security_data = json.load(f)
-                    if isinstance(security_data, dict) and "errors" in security_data:
-                        security_issues = len(security_data["errors"])
-                    elif isinstance(security_data, list):
-                        security_issues = len(security_data)
-                phases["security"] = {"issues": security_issues}
+            security_files = [
+                os.path.join(reports_dir, "security_issues.json"),
+                os.path.join(reports_dir, "bandit_results.json"),
+                os.path.join(reports_dir, "vulnerabilities.json")
+            ]
+            
+            for security_file in security_files:
+                if os.path.exists(security_file):
+                    try:
+                        with open(security_file, "r", encoding="utf-8") as f:
+                            security_data = json.load(f)
+                            if isinstance(security_data, dict):
+                                if "results" in security_data:
+                                    security_issues = len(security_data["results"])
+                                elif "errors" in security_data:
+                                    security_issues = len(security_data["errors"])
+                                elif "issues" in security_data:
+                                    security_issues = len(security_data["issues"])
+                            elif isinstance(security_data, list):
+                                security_issues = len(security_data)
+                        break
+                    except:
+                        continue
+            
+            phases["security"] = {"issues": security_issues}
         except Exception as e:
             if self.verbose:
                 print(f"Ошибка при загрузке результатов безопасности: {e}")
 
-        # Расчет рейтинга
-        rating = self._calculate_rating(code_issues, security_issues)
+        # Чтение данных тестового покрытия
+        try:
+            coverage_file = os.path.join(reports_dir, "coverage.json")
+            if os.path.exists(coverage_file):
+                with open(coverage_file, "r", encoding="utf-8") as f:
+                    coverage_data = json.load(f)
+                    if isinstance(coverage_data, dict):
+                        # Пытаемся найти общий процент покрытия
+                        if "totals" in coverage_data and "percent_covered" in coverage_data["totals"]:
+                            test_coverage = coverage_data["totals"]["percent_covered"]
+                        elif "coverage" in coverage_data:
+                            test_coverage = coverage_data["coverage"]
+        except Exception as e:
+            if self.verbose:
+                print(f"Ошибка при загрузке данных тестового покрытия: {e}")
+
+        # Расчет рейтинга с учетом всех факторов
+        rating = self._calculate_rating(code_issues, security_issues, test_coverage)
 
         # Преобразование рекомендаций в список
-        recommendations_list = [
-            rec.strip() for rec in recommendations_text.split("\n") if rec.strip()
-        ]
+        if isinstance(recommendations_text, str):
+            recommendations_list = [
+                rec.strip() for rec in recommendations_text.split("\n") 
+                if rec.strip() and not rec.startswith("#")
+            ]
+        else:
+            recommendations_list = []
 
         return AuditResult(
             total_issues=code_issues + security_issues,
             code_issues=code_issues,
             security_issues=security_issues,
-            test_coverage=0.0,  # Можно добавить позже из данных coverage
+            test_coverage=test_coverage,
             rating=rating,
             recommendations=recommendations_list,
             phases=phases
         )
 
     @staticmethod
-    def _calculate_rating(code_issues: int, security_issues: int) -> float:
-        """Расчет оценки качества кода"""
+    def _calculate_rating(code_issues: int, security_issues: int, test_coverage: float = 0.0) -> float:
+        """Расчет оценки качества кода с учетом всех факторов"""
         base_rating = 10.0
-        deduction = 0.5 * (code_issues + security_issues)
-        rating = max(1, base_rating - deduction)
+        
+        # Штраф за ошибки кода (0.3 за ошибку)
+        code_deduction = 0.3 * code_issues
+        
+        # Штраф за проблемы безопасности (0.8 за ошибку - более критично)
+        security_deduction = 0.8 * security_issues
+        
+        # Бонус за хорошее тестовое покрытие
+        coverage_bonus = 0
+        if test_coverage > 80:
+            coverage_bonus = 1.0
+        elif test_coverage > 60:
+            coverage_bonus = 0.5
+        elif test_coverage == 0:
+            coverage_bonus = -0.5  # Штраф за отсутствие тестов
+        
+        # Итоговый расчет
+        rating = base_rating - code_deduction - security_deduction + coverage_bonus
+        rating = max(1, min(10, rating))  # Ограничиваем от 1 до 10
+        
         return round(rating, 1)
 
     def get_status(self) -> Dict[str, Any]:

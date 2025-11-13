@@ -300,7 +300,7 @@ class MainWindowV4(QMainWindow):
         self._update_history()
         
         # Дерево ошибок
-        self.tree_widget.populate_from_report(report)
+        self.tree_widget.populate_from_report(report, project_root=self.selected_path)
         
         # Графики
         self.visualizer.set_report(report)

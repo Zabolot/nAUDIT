@@ -241,9 +241,17 @@ class ErrorTreeWidget(QWidget):
     
     def _get_category(self, issue_type: str, code: str) -> IssueCategory:
         """Определить категорию по типу"""
+        # Сначала проверяем явный тип из issue_type
         if issue_type == 'security':
             return IssueCategory.SECURITY
+        elif issue_type == 'style_issue':
+            return IssueCategory.STYLE
+        elif issue_type == 'warning':
+            return IssueCategory.WARNING
+        elif issue_type == 'error':
+            return IssueCategory.ERROR
         
+        # Если issue_type не определен, используем код для определения
         if code and code[0] == 'E':
             return IssueCategory.ERROR
         

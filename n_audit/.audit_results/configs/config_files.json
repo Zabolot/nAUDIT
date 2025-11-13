@@ -1,0 +1,25 @@
+{
+  "found_configs": [
+    "G:\\CODING\\nAUDIT\\n_audit\\audit_manager.py",
+    "G:\\CODING\\nAUDIT\\n_audit\\audit_manager_v2.py",
+    "G:\\CODING\\nAUDIT\\n_audit\\code_analysis.py",
+    "G:\\CODING\\nAUDIT\\n_audit\\core.py",
+    "G:\\CODING\\nAUDIT\\n_audit\\infrastructure.py",
+    "G:\\CODING\\nAUDIT\\n_audit\\init.py",
+    "G:\\CODING\\nAUDIT\\n_audit\\main.py",
+    "G:\\CODING\\nAUDIT\\n_audit\\recommendations.py",
+    "G:\\CODING\\nAUDIT\\n_audit\\security.py",
+    "G:\\CODING\\nAUDIT\\n_audit\\tests_analysis.py",
+    "G:\\CODING\\nAUDIT\\n_audit\\utils.py",
+    "G:\\CODING\\nAUDIT\\n_audit\\visualizations.py",
+    "G:\\CODING\\nAUDIT\\n_audit\\__init__.py",
+    "G:\\CODING\\nAUDIT\\n_audit\\.audit_results\\configs\\config_files.json",
+    "G:\\CODING\\nAUDIT\\n_audit\\.audit_results\\configs\\docker_info.json",
+    "G:\\CODING\\nAUDIT\\n_audit\\.audit_results\\configs\\environment_info.json",
+    "G:\\CODING\\nAUDIT\\n_audit\\.audit_results\\configs\\requirements_snapshot.txt",
+    "G:\\CODING\\nAUDIT\\n_audit\\.audit_results\\reports\\pylint_full.json",
+    "G:\\CODING\\nAUDIT\\n_audit\\.audit_results\\reports\\vulnerabilities.json",
+    "G:\\CODING\\nAUDIT\\n_audit\\gui\\main_app.py"
+  ],
+  "total_configs": 271
+}

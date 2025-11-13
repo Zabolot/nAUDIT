@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-Скрипт сборки nAUDIT v2.1.exe с УЛУЧШЕНИЯМИ.
-Включает все компоненты для работающего анализа и красивого интерфейса.
+Скрипт сборки nAUDIT v3 с полной диагностикой и интерактивными графиками.
+Включает все компоненты для работающего анализа и красивого интерфейса с matplotlib.
 """
 
 import os
@@ -10,13 +11,18 @@ import subprocess
 import shutil
 from pathlib import Path
 
+# Установка кодировки вывода
+if sys.stdout.encoding != 'utf-8':
+    import codecs
+    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+
 
 def main():
     project_root = Path(__file__).parent.absolute()
     os.chdir(project_root)
     
     print("=" * 70)
-    print("[*] nAUDIT v2.1 - СБОРКА УЛУЧШЕННОГО .EXE")
+    print("[*] nAUDIT v3 - СБОРКА ФИНАЛЬНОЙ ВЕРСИИ С ДИАГНОСТИКОЙ")
     print("=" * 70)
     
     # Очистка старых сборок
@@ -24,21 +30,19 @@ def main():
     for path in ["build", "dist"]:
         if (project_root / path).exists():
             shutil.rmtree(project_root / path)
-            print(f"   ✓ Удален: {path}/")
+            print(f"   [+] Удален: {path}/")
     
     for spec_file in project_root.glob("*.spec"):
         spec_file.unlink()
-        print(f"   ✓ Удален: {spec_file.name}")
+        print(f"   [+] Удален: {spec_file.name}")
     
-    # Сборка - ВСЕ НЕОБХОДИМЫЕ МОДУЛИ
-    print("\n[2/3] Сборка приложения (2-3 минуты)...")
-    print("   Используется: PyInstaller с --collect-all")
+    # Сборка
+    print("\n[2/3] Сборка приложения (3-5 минут)...")
+    print("   Используется: PyInstaller с полной коллекцией модулей")
     print("   Параметры:")
     print("     • --onefile (один файл)")
     print("     • --windowed (без консоли)")
-    print("     • --collect-all=n_audit (все модули анализа)")
-    print("     • --collect-all=PyQt6 (все компоненты PyQt6)")
-    print("     • --collect-all=matplotlib (графики)")
+    print("     • --collect-all для: n_audit, PyQt6, matplotlib")
     print()
     
     cmd = [
@@ -46,7 +50,7 @@ def main():
         "-m", "PyInstaller",
         "--onefile",
         "--windowed",
-        "--name=nAUDIT",
+        "--name=nAUDIT_v3",
         "--collect-all=n_audit",
         "--collect-all=PyQt6",
         "--collect-all=matplotlib",
@@ -61,26 +65,28 @@ def main():
     
     # Проверка результата
     print("\n[3/3] Проверка результата...")
-    exe_file = project_root / "dist" / "nAUDIT.exe"
+    exe_file = project_root / "dist" / "nAUDIT_v3.exe"
     
     if exe_file.exists():
         size_mb = exe_file.stat().st_size / (1024 * 1024)
-        print(f"   ✓ Файл создан: {exe_file}")
-        print(f"   ✓ Размер: {size_mb:.1f} МБ")
+        print(f"   [+] Файл создан: {exe_file}")
+        print(f"   [+] Размер: {size_mb:.1f} МБ")
     else:
-        print(f"   ✗ Файл не найден: {exe_file}")
+        print(f"   [-] Файл не найден: {exe_file}")
         sys.exit(1)
     
     # Итоги
     print("\n" + "=" * 70)
-    print("[SUCCESS] Сборка v2.1 завершена успешно!")
+    print("[SUCCESS] Сборка v3 завершена успешно!")
     print("=" * 70)
     print(f"\nПриложение: {exe_file}")
-    print(f"\nУлучшения v2.1:")
-    print("   ✓ Реальный анализ кода (не фейковые результаты)")
-    print("   ✓ Работающий экспорт (JSON + HTML)")
-    print("   ✓ Улучшенный интерфейс с прогрессом")
-    print("   ✓ Визуализация результатов")
+    print(f"\nУлучшения v3:")
+    print("   [+] Полная диагностика процесса анализа")
+    print("   [+] Интерактивные графики matplotlib")
+    print("   [+] Реальные метрики вместо фейков")
+    print("   [+] Проверка на пустые папки и отсутствие кода")
+    print("   [+] История анализов с сохранением")
+    print("   [+] Детальные логи и отчёты")
     print(f"\nЗапуск:")
     print(f"   {exe_file}")
     print()

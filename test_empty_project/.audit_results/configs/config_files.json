@@ -1,0 +1,25 @@
+{
+  "found_configs": [
+    "G:\\CODING\\nAUDIT\\test_empty_project\\.audit_results\\configs\\config_files.json",
+    "G:\\CODING\\nAUDIT\\test_empty_project\\.audit_results\\configs\\docker_info.json",
+    "G:\\CODING\\nAUDIT\\test_empty_project\\.audit_results\\configs\\environment_info.json",
+    "G:\\CODING\\nAUDIT\\test_empty_project\\.audit_results\\configs\\requirements_snapshot.txt",
+    "G:\\CODING\\nAUDIT\\test_empty_project\\.audit_results\\reports\\pylint_full.json",
+    "G:\\CODING\\nAUDIT\\test_empty_project\\.audit_results\\reports\\vulnerabilities.json",
+    "G:\\CODING\\nAUDIT\\test_empty_project\\.audit_results\\configs\\config_files.json",
+    "G:\\CODING\\nAUDIT\\test_empty_project\\.audit_results\\configs\\docker_info.json",
+    "G:\\CODING\\nAUDIT\\test_empty_project\\.audit_results\\configs\\environment_info.json",
+    "G:\\CODING\\nAUDIT\\test_empty_project\\.audit_results\\configs\\requirements_snapshot.txt",
+    "G:\\CODING\\nAUDIT\\test_empty_project\\.audit_results\\reports\\pylint_full.json",
+    "G:\\CODING\\nAUDIT\\test_empty_project\\.audit_results\\reports\\vulnerabilities.json",
+    "G:\\CODING\\nAUDIT\\test_empty_project\\.audit_results\\configs\\config_files.json",
+    "G:\\CODING\\nAUDIT\\test_empty_project\\.audit_results\\configs\\docker_info.json",
+    "G:\\CODING\\nAUDIT\\test_empty_project\\.audit_results\\configs\\environment_info.json",
+    "G:\\CODING\\nAUDIT\\test_empty_project\\.audit_results\\configs\\requirements_snapshot.txt",
+    "G:\\CODING\\nAUDIT\\test_empty_project\\.audit_results\\reports\\pylint_full.json",
+    "G:\\CODING\\nAUDIT\\test_empty_project\\.audit_results\\reports\\vulnerabilities.json",
+    "G:\\CODING\\nAUDIT\\test_empty_project\\.audit_results\\configs\\config_files.json",
+    "G:\\CODING\\nAUDIT\\test_empty_project\\.audit_results\\configs\\docker_info.json"
+  ],
+  "total_configs": 37
+}

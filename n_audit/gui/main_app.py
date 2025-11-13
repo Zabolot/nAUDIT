@@ -23,19 +23,23 @@ def main():
     try:
         # Пробуем разные варианты импорта для совместимости с PyInstaller
         try:
-            from n_audit.gui.main_window_v2 import nAUDITMainWindow
+            from n_audit.gui.main_window_v3 import nAUDITMainWindow
         except (ImportError, ModuleNotFoundError):
             try:
-                # Альтернативный импорт если первый не сработал
-                from gui.main_window_v2 import nAUDITMainWindow
+                from gui.main_window_v3 import nAUDITMainWindow
             except (ImportError, ModuleNotFoundError):
-                # Попытка с относительным импортом
-                import os
-                gui_path = os.path.dirname(os.path.abspath(__file__))
-                sys.path.insert(0, gui_path)
-                from main_window_v2 import nAUDITMainWindow
+                try:
+                    from n_audit.gui.main_window_v2 import nAUDITMainWindow
+                except (ImportError, ModuleNotFoundError):
+                    import os
+                    gui_path = os.path.dirname(os.path.abspath(__file__))
+                    sys.path.insert(0, gui_path)
+                    try:
+                        from main_window_v3 import nAUDITMainWindow
+                    except (ImportError, ModuleNotFoundError):
+                        from main_window_v2 import nAUDITMainWindow
     except ImportError as e:
-        print(f"Ошибка импорта main_window_v2: {e}")
+        print(f"Ошибка импорта интерфейса: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

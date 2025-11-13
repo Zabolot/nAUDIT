@@ -33,7 +33,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='nAUDIT',
+    name='nAUDIT_v3',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

@@ -16,6 +16,7 @@ import tempfile
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Dict, List, Set, Optional
+from datetime import datetime
 import json
 import re
 
@@ -23,7 +24,8 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
     QLabel, QSlider, QCheckBox, QComboBox, QSpinBox
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QUrl
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QUrl, QObject, pyqtSlot
+from PyQt6.QtCore import QEvent
 from PyQt6.QtWebEngineWidgets import QWebEngineView
 from PyQt6.QtGui import QFont
 
@@ -46,6 +48,22 @@ try:
     HAS_PYVIS = True
 except ImportError:
     HAS_PYVIS = False
+
+
+class GraphNodeBridge(QObject):
+    """Мост между JavaScript графа и Python UI для синхронизации выбора узлов"""
+    
+    # Сигнал: когда пользователь кликнул на узел в графе
+    node_clicked = pyqtSignal(str)  # file_path
+    
+    def __init__(self):
+        super().__init__()
+    
+    @pyqtSlot(str)
+    def onNodeClicked(self, file_path: str):
+        """Вызывается из JavaScript когда пользователь кликает на узел"""
+        print(f"[GraphNodeBridge] Узел выбран: {file_path}")
+        self.node_clicked.emit(file_path)
 
 
 @dataclass
@@ -107,11 +125,11 @@ class GraphVisualizerWidget(QWidget):
         """Инициализировать UI"""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        
+
         # Панель управления
         control_layout = QHBoxLayout()
         control_layout.setContentsMargins(5, 5, 5, 5)
-        
+
         # Фильтр по серьезности
         control_layout.addWidget(QLabel("Фильтр:"))
         self.severity_filter_combo = QComboBox()
@@ -119,44 +137,47 @@ class GraphVisualizerWidget(QWidget):
         self.severity_filter_combo.currentTextChanged.connect(self._on_filter_changed)
         self.severity_filter_combo.setMaximumWidth(120)
         control_layout.addWidget(self.severity_filter_combo)
-        
-        # Масштаб узлов
+
+        # Масштаб узлов (значение привязано к scale_factor)
         control_layout.addWidget(QLabel("Масштаб:"))
         self.scale_slider = QSlider(Qt.Orientation.Horizontal)
         self.scale_slider.setMinimum(50)
-        self.scale_slider.setMaximum(200)
-        self.scale_slider.setValue(100)
+        self.scale_slider.setMaximum(300)
+        self.scale_slider.setValue(int(self.scale_factor * 100))
         self.scale_slider.setMaximumWidth(150)
         self.scale_slider.setTickInterval(25)
         self.scale_slider.setTickPosition(QSlider.TickPosition.TicksBelow)
         self.scale_slider.valueChanged.connect(self._on_scale_changed)
         control_layout.addWidget(self.scale_slider)
-        
+
         # Опции
         self.show_labels = QCheckBox("Метки")
         self.show_labels.setChecked(True)
         self.show_labels.stateChanged.connect(self._on_labels_toggled)
         control_layout.addWidget(self.show_labels)
-        
+
         self.show_edges = QCheckBox("Связи")
         self.show_edges.setChecked(True)
         self.show_edges.stateChanged.connect(self._on_edges_toggled)
         control_layout.addWidget(self.show_edges)
-        
+
         # Кнопка обновления
         refresh_btn = QPushButton("🔄")
         refresh_btn.setMaximumWidth(40)
         refresh_btn.setToolTip("Обновить граф")
         refresh_btn.clicked.connect(self._on_refresh)
         control_layout.addWidget(refresh_btn)
-        
+
         control_layout.addStretch()
         layout.addLayout(control_layout)
-        
+
         # Web view для визуализации
         self.web_view = QWebEngineView()
         self.web_view.setMinimumHeight(400)
-        # Показываем приветственное сообщение
+        # Устанавливаем фильтр событий для обработки колеса и кликов
+        self.web_view.installEventFilter(self)
+
+        # Приветственное сообщение пока граф не готов
         welcome_html = """
         <html>
         <head><meta charset="UTF-8">
@@ -178,6 +199,11 @@ class GraphVisualizerWidget(QWidget):
         """
         self.web_view.setHtml(welcome_html)
         layout.addWidget(self.web_view)
+
+        # флаг, чтобы не рендерить в процессе инициализации
+        self._initializing = False
+        # флаг фокусного эффекта после клика
+        self._focus_active = False
     
     def populate_from_report(self, report, project_root: str = "."):
         """
@@ -273,6 +299,43 @@ class GraphVisualizerWidget(QWidget):
         
         print(f"[GraphVisualizer] Добавлено {len(self.nodes)} узлов")
         
+        # Добавляем все файлы проекта (включая без ошибок), но только если их нет уже
+        try:
+            project_root_path = Path(project_root) if isinstance(project_root, Path) else Path(project_root)
+            scanned_files = set()
+            for p in project_root_path.rglob('*.py'):
+                try:
+                    rel = str(p.relative_to(project_root_path)).replace('\\', '/')
+                    # Skip __pycache__, .egg-info и другие служебные папки
+                    if '__pycache__' in rel or '.egg' in rel or '.dist-info' in rel:
+                        continue
+                    if rel not in self.nodes and rel not in scanned_files:
+                        scanned_files.add(rel)
+                        # Подсчитываем строки для новых файлов
+                        lines = 0
+                        try:
+                            if p.exists():
+                                with open(p, 'r', encoding='utf-8', errors='ignore') as f:
+                                    lines = len(f.readlines())
+                        except:
+                            pass
+                        
+                        node = FileNode(
+                            file_path=rel,
+                            lines_of_code=lines,
+                            errors_count=0,
+                            max_severity='LOW',
+                            folder=str(p.parent.relative_to(project_root_path)).replace('\\', '/') if p.parent != project_root_path else 'root'
+                        )
+                        self.nodes[rel] = node
+                except Exception as e:
+                    print(f"[GraphVisualizer] Ошибка при сканировании {p}: {e}")
+                    pass
+            print(f"[GraphVisualizer] После добавления всех файлов: {len(self.nodes)} узлов (scanned: {len(scanned_files)})")
+        except Exception as e:
+            print(f"[GraphVisualizer] Ошибка сканирования проекта: {e}")
+            pass
+
         # Строим граф визуализацию
         self._render_graph()
     
@@ -293,6 +356,55 @@ class GraphVisualizerWidget(QWidget):
         base_size = 25
         scale = max(0, min(25, int((lines ** 0.5) / 2)))
         return int((base_size + scale) * self.scale_factor)
+
+    def eventFilter(self, obj, event):
+        # Обрабатываем колесо мыши и клик для web_view
+        if obj is self.web_view:
+            if event.type() == QEvent.Type.Wheel:
+                # delta в PyQt6: angleDelta().y()
+                try:
+                    delta = event.angleDelta().y()
+                except Exception:
+                    # Если нет, пробуем delta()
+                    delta = event.delta()
+                if delta > 0:
+                    self.scale_factor = min(3.0, self.scale_factor * 1.12)
+                else:
+                    self.scale_factor = max(0.2, self.scale_factor / 1.12)
+                # синхронизируем ползунок
+                try:
+                    self.scale_slider.blockSignals(True)
+                    self.scale_slider.setValue(int(self.scale_factor * 100))
+                finally:
+                    self.scale_slider.blockSignals(False)
+                self._render_graph()
+                return True
+            elif event.type() == QEvent.Type.MouseButtonPress:
+                # На любой клик — временно усиливаем фокус (увеличиваем масштаб и включаем эффект)
+                self._focus_active = True
+                self.scale_factor = min(3.0, self.scale_factor * 1.2)
+                try:
+                    self.scale_slider.blockSignals(True)
+                    self.scale_slider.setValue(int(self.scale_factor * 100))
+                finally:
+                    self.scale_slider.blockSignals(False)
+                # Запускаем рендер
+                self._render_graph()
+                # Снимаем эффект через 800ms
+                QTimer.singleShot(800, self._clear_focus)
+                return True
+        return super().eventFilter(obj, event)
+
+    def _clear_focus(self):
+        self._focus_active = False
+        # немного уменьшим масштаб к исходному
+        self.scale_factor = max(0.5, self.scale_factor / 1.1)
+        try:
+            self.scale_slider.blockSignals(True)
+            self.scale_slider.setValue(int(self.scale_factor * 100))
+        finally:
+            self.scale_slider.blockSignals(False)
+        self._render_graph()
     
     def _render_graph(self):
         """Отложенный рендеринг графа (с дебаунсингом)"""
@@ -343,111 +455,104 @@ class GraphVisualizerWidget(QWidget):
             self._show_error_graph(str(e))
     
     def _render_with_plotly(self, nodes_to_show: Dict, node_count: int):
-        """Рендерить граф с использованием Plotly"""
-        print(f"[GraphVisualizer] Используюусь Plotly для рендеринга {node_count} узлов")
+        """Рендерить граф с использованием Plotly (профессиональная визуализация)"""
+        print(f"[GraphVisualizer] Рендерю Plotly граф для {node_count} узлов")
         
         try:
-            # Создаём граф NetworkX для компоновки
-            if nx is None:
-                print("[GraphVisualizer] NetworkX не установлен, используем простую компоновку")
-                graph = None
-            else:
-                graph = nx.DiGraph()
-            
-            # Данные узлов
-            node_ids = list(nodes_to_show.keys())
+            # Group nodes by folder to create "clouds"
+            node_ids: List[str] = []
+            folders: Dict[str, List[str]] = {}
+            for file_path in nodes_to_show.keys():
+                folder = nodes_to_show[file_path].folder
+                folders.setdefault(folder, []).append(file_path)
+
+            # Determine folder-level max severity (hierarchical color)
+            severity_order = {'CRITICAL': 4, 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1}
+            folder_max: Dict[str, str] = {}
+            for folder, files in folders.items():
+                maxs = 'LOW'
+                for fp in files:
+                    sev = nodes_to_show[fp].max_severity
+                    if severity_order.get(sev, 0) > severity_order.get(maxs, 0):
+                        maxs = sev
+                folder_max[folder] = maxs
+
+            # Compute folder centers on grid
+            folder_list = list(folders.keys())
+            fcount = len(folder_list)
+            fcols = int(fcount ** 0.5) + 1
+            spacing = 10.0
+            folder_centers = {}
+            for idx, folder in enumerate(folder_list):
+                fx = (idx % fcols) * spacing
+                fy = (idx // fcols) * spacing
+                folder_centers[folder] = (fx, fy)
+
             node_x = []
             node_y = []
             node_colors = []
             node_sizes = []
             node_labels = []
             node_hovers = []
-            
-            # Рассчитываем позиции узлов
-            if graph is not None:
-                for file_path in node_ids:
-                    graph.add_node(file_path)
-                
-                try:
-                    # Используем spring layout для лучшего распределения
-                    pos = nx.spring_layout(graph, k=0.5, iterations=50, seed=42)
-                    for file_path in node_ids:
-                        if file_path in pos:
-                            x, y = pos[file_path]
-                            node_x.append(x)
-                            node_y.append(y)
-                        else:
-                            node_x.append(0)
-                            node_y.append(0)
-                except:
-                    # Fallback на простую сетку
-                    cols = int(node_count ** 0.5) + 1
-                    for i, file_path in enumerate(node_ids):
-                        node_x.append((i % cols) * 2)
-                        node_y.append((i // cols) * 2)
-            else:
-                # Простая сетка если NetworkX недоступен
-                cols = int(node_count ** 0.5) + 1
-                for i in range(node_count):
-                    node_x.append((i % cols) * 2)
-                    node_y.append((i // cols) * 2)
-            
-            # Собираем информацию об узлах
-            for i, file_path in enumerate(node_ids):
-                node = nodes_to_show[file_path]
-                
-                # Цвет узла
-                color = self._get_color(node.max_severity)
-                node_colors.append(color)
-                
-                # Размер узла
-                size = max(15, min(50, 20 + node.errors_count * 5 + int((node.lines_of_code ** 0.5) / 10)))
-                node_sizes.append(size)
-                
-                # Текст узла
-                file_name = Path(file_path).name
-                if self.show_labels.isChecked():
-                    label_text = file_name
-                    if node.errors_count > 0:
+
+            # Place nodes around their folder center
+            for folder in folder_list:
+                files = folders[folder]
+                center_x, center_y = folder_centers[folder]
+                f_len = max(1, len(files))
+                for i, file_path in enumerate(files):
+                    angle = (i / f_len) * 2 * 3.14159
+                    radius = 1.5 + (i % 6) * 0.6
+                    x = center_x + radius * (1.0 * (0.8 + 0.4 * (i % 3))) * (1 if (i % 2 == 0) else -1)
+                    y = center_y + radius * (1.0 * (0.6 + 0.3 * (i % 2))) * (1 if (i % 3 == 0) else -1)
+                    node_x.append(x)
+                    node_y.append(y)
+                    node_ids.append(file_path)
+
+                    node = nodes_to_show[file_path]
+                    # If node has no errors - inherit folder max severity
+                    node_sev = node.max_severity
+                    if node.errors_count == 0 and folder_max.get(folder):
+                        node_sev = folder_max[folder]
+                    color = self._get_color(node_sev)
+                    node_colors.append(color)
+
+                    # Size influenced by errors and lines
+                    size = max(12, min(60, 18 + node.errors_count * 6 + int((node.lines_of_code ** 0.5) / 5)))
+                    # Apply focus effect
+                    if self._focus_active:
+                        size = int(size * 1.25)
+                    node_sizes.append(size)
+
+                    file_name = Path(file_path).name
+                    label_text = file_name if self.show_labels.isChecked() else ""
+                    if node.errors_count > 0 and self.show_labels.isChecked():
                         label_text += f"\n{node.errors_count}⚠️"
                     node_labels.append(label_text)
-                else:
-                    node_labels.append("")
-                
-                # Tooltip
-                hover_text = (
-                    f"<b>{file_name}</b><br>"
-                    f"Папка: {node.folder}<br>"
-                    f"Строк: {node.lines_of_code}<br>"
-                    f"Ошибок: {node.errors_count}<br>"
-                    f"Серьезность: {node.max_severity}"
-                )
-                node_hovers.append(hover_text)
+
+                    hover_text = (
+                        f"<b>{file_name}</b><br>"
+                        f"Папка: {node.folder}<br>"
+                        f"Строк: {node.lines_of_code}<br>"
+                        f"Ошибок: {node.errors_count}<br>"
+                        f"Серьезность: {node_sev}"
+                    )
+                    node_hovers.append(hover_text)
             
             # Создаём рёбра
             edge_x = []
             edge_y = []
             
             if self.show_edges.isChecked() and node_count < 200:
-                # Соединяем файлы с ошибками в одной папке
-                folders = {}
-                for file_path in node_ids:
-                    node = nodes_to_show[file_path]
-                    folder = node.folder
-                    if folder not in folders:
-                        folders[folder] = []
-                    folders[folder].append(file_path)
-                
-                for folder, files in folders.items():
-                    # Соединяем первые 2 файла в папке
+                # Соединяем файлы в пределах папки (по расположению в списке)
+                for folder in folder_list:
+                    files = folders[folder]
                     for i in range(len(files) - 1):
                         idx1 = node_ids.index(files[i])
                         idx2 = node_ids.index(files[i + 1])
-                        
                         edge_x.append(node_x[idx1])
                         edge_x.append(node_x[idx2])
                         edge_x.append(None)
-                        
                         edge_y.append(node_y[idx1])
                         edge_y.append(node_y[idx2])
                         edge_y.append(None)
@@ -466,15 +571,18 @@ class GraphVisualizerWidget(QWidget):
                 ))
             
             # Добавляем узлы
+            node_opacity = 0.95 if not self._focus_active else 0.7
             fig.add_trace(go.Scatter(
                 x=node_x, y=node_y,
                 mode='markers+text',
+                customdata=node_ids,  # file_path для JS callback
                 marker=dict(
                     size=node_sizes,
                     color=node_colors,
-                    line=dict(width=2, color='#000000'),
-                    opacity=0.9,
-                    sizemode='diameter'
+                    line=dict(width=1.5, color='#000000'),
+                    opacity=node_opacity,
+                    sizemode='diameter',
+                    sizeref=2.0 * self.scale_factor
                 ),
                 text=node_labels,
                 textposition="middle center",
@@ -494,20 +602,27 @@ class GraphVisualizerWidget(QWidget):
                 annotations=[],
                 xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
                 yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                plot_bgcolor='#fafafa',  # Светлый фон
+                plot_bgcolor='#fafafa',
                 paper_bgcolor='#ffffff',
                 height=600,
-                width=None
+                width=None,
+                transition=dict(duration=300, easing='quad-in-out')
             )
             
-            # Сохраняем HTML
+            # Сохраняем HTML (с Plotly JS встроенным, примерно 3 MB)
             html_file = Path(tempfile.gettempdir()) / "naudit_graph_temp.html"
             
             try:
-                fig.write_html(str(html_file))
-                print(f"[GraphVisualizer] Plotly HTML сохранен: {html_file}")
+                # Используем встроенный Plotly JS для offline работы
+                html_content = fig.to_html(include_plotlyjs='inline')
+                html_file.write_text(html_content, encoding='utf-8')
+                size_kb = len(html_content) / 1024
+                print(f"[GraphVisualizer] HTML граф сохранён ({size_kb:.1f} KB): {html_file}")
+                
+                # Сохраняем также в reports/graphs для экспорта
+                self._save_graph_export(fig, node_count)
             except Exception as e:
-                print(f"[GraphVisualizer] Ошибка при сохранении Plotly HTML: {e}")
+                print(f"[GraphVisualizer] Ошибка при сохранении HTML: {e}")
                 return
             
             # Загружаем в web view
@@ -545,43 +660,51 @@ class GraphVisualizerWidget(QWidget):
                 g.barnes_hut(gravity=-30000, central_gravity=0.3, spring_length=200)
                 g.toggle_physics(True)
             
-            # Группируем по папкам
-            folders = {}
+            # Группируем по папкам и определяем folder-level severity
+            folders: Dict[str, List[str]] = {}
             for file_path, node in nodes_to_show.items():
-                folder = node.folder
-                if folder not in folders:
-                    folders[folder] = []
-                folders[folder].append((file_path, node))
-            
-            # Генерируем цвета для папок
-            folder_colors = self._generate_folder_colors(len(folders))
-            
-            # Добавляем узлы с цветовой кодировкой
+                folders.setdefault(node.folder, []).append(file_path)
+
+            severity_order = {'CRITICAL': 4, 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1}
+            folder_max = {}
+            for folder, files in folders.items():
+                maxs = 'LOW'
+                for fp in files:
+                    sev = nodes_to_show[fp].max_severity
+                    if severity_order.get(sev, 0) > severity_order.get(maxs, 0):
+                        maxs = sev
+                folder_max[folder] = maxs
+
+            # Добавляем узлы с цветовой кодировкой (унаследованной от папки если нужно)
             for folder_idx, (folder, files) in enumerate(folders.items()):
-                for file_path, node in files:
-                    size = self._get_size(node.lines_of_code)
-                    color = self._get_color(node.max_severity)
-                    
+                for file_path in files:
+                    node = nodes_to_show[file_path]
+                    size = int(self._get_size(node.lines_of_code))
+                    node_sev = node.max_severity
+                    if node.errors_count == 0 and folder_max.get(folder):
+                        node_sev = folder_max[folder]
+                    color = self._get_color(node_sev)
+
                     # Имя файла с количеством ошибок
                     file_name = Path(file_path).name
                     label = file_name if self.show_labels.isChecked() else ""
-                    
                     if node.errors_count > 0 and self.show_labels.isChecked():
                         label += f"\n{node.errors_count}⚠️"
-                    
+
                     title_text = (
                         f"<b>{file_name}</b><br>"
                         f"Папка: {folder}<br>"
                         f"Строк: {node.lines_of_code}<br>"
                         f"Ошибок: {node.errors_count}<br>"
-                        f"Серьезность: {node.max_severity}"
+                        f"Серьезность: {node_sev}"
                     )
-                    
+
+                    actual_size = int(size * self.scale_factor * (1.25 if self._focus_active else 1.0))
                     g.add_node(
                         file_path,
                         label=label,
                         color=color,
-                        size=size,
+                        size=actual_size,
                         title=title_text,
                         mass=1,
                         font={'size': 12, 'face': 'arial'},
@@ -795,6 +918,90 @@ class GraphVisualizerWidget(QWidget):
     def _on_refresh(self):
         """Обновить граф"""
         self._render_graph()
+    
+    def _save_graph_export(self, fig, node_count: int):
+        """Сохранить граф в экспортную папку для дальнейшего использования"""
+        try:
+            from pathlib import Path
+            
+            # Создаём папку graphs в ~/.naudit/reports
+            export_dir = Path.home() / '.naudit' / 'reports' / 'graphs'
+            export_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Генерируем имя файла с временем
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            html_file = export_dir / f"graph_{timestamp}.html"
+            
+            # Сохраняем Plotly граф
+            html_content = fig.to_html(include_plotlyjs='inline')
+            html_file.write_text(html_content, encoding='utf-8')
+            
+            size_kb = len(html_content) / 1024
+            print(f"[GraphVisualizer] Граф экспортирован ({size_kb:.1f} KB) в: {html_file}")
+            
+            # Сохраняем метаданные о графе для каталогизации
+            metadata_file = export_dir / f"graph_{timestamp}_meta.json"
+            import json
+            metadata = {
+                'timestamp': timestamp,
+                'node_count': node_count,
+                'file_size_kb': round(size_kb, 1),
+                'scale_factor': self.scale_factor,
+                'show_labels': self.show_labels.isChecked(),
+                'show_edges': self.show_edges.isChecked(),
+            }
+            metadata_file.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding='utf-8')
+            
+            return html_file
+        except Exception as e:
+            print(f"[Error] Ошибка при экспорте графа: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def export_current_graph(self) -> Path:
+        """Экспортировать текущий граф в пользовательскую папку"""
+        if not self.nodes:
+            print("[GraphVisualizer] Нет узлов для экспорта")
+            return None
+        
+        try:
+            # Используем встроенный диалог сохранения файла
+            from PyQt6.QtWidgets import QFileDialog
+            
+            desktop = Path.home() / 'Desktop'
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            default_name = f"naudit_graph_{timestamp}.html"
+            
+            # Спрашиваем пользователя где сохранить
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Сохранить граф проекта",
+                str(desktop / default_name),
+                "HTML файлы (*.html);;Все файлы (*.*)"
+            )
+            
+            if not file_path:
+                return None
+            
+            # Перестраиваем граф для экспорта
+            nodes_to_show = self.nodes
+            if not nodes_to_show:
+                return None
+            
+            # Здесь используем уже готовый temp файл или перестраиваем
+            temp_file = Path(tempfile.gettempdir()) / "naudit_graph_temp.html"
+            if temp_file.exists():
+                import shutil
+                shutil.copy(temp_file, file_path)
+                print(f"[GraphVisualizer] Граф сохранён: {file_path}")
+                return Path(file_path)
+        
+        except Exception as e:
+            print(f"[Error] Ошибка при экспорте графа пользователем: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     def clear(self):
         """Очистить граф"""

@@ -315,15 +315,20 @@ class MainWindowV4(QMainWindow):
         self.project_info.setHtml(msg)
     
     def _on_export(self):
-        """Экспортировать отчет"""
+        """Экспортировать отчет и граф"""
         if not self.current_report:
             return
         
-        # Сохраняем все форматы
+        # Сохраняем все форматы отчета
         try:
             json_path = self.report_generator.save_json_report(self.current_report)
             html_path = self.report_generator.save_html_report(self.current_report)
             csv_path = self.report_generator.save_csv_report(self.current_report)
+            
+            # Экспортируем график если он доступен
+            graph_path = None
+            if self.tree_widget and hasattr(self.tree_widget, 'graph_widget'):
+                graph_path = self.tree_widget.graph_widget.export_current_graph()
             
             msg = f"""
             <b>✅ Отчеты успешно сохранены:</b><br><br>
@@ -331,6 +336,11 @@ class MainWindowV4(QMainWindow):
             📊 HTML: {html_path}<br>
             📋 CSV: {csv_path}<br>
             """
+            
+            if graph_path:
+                msg += f"📈 Граф: {graph_path}<br>"
+            else:
+                msg += "<i style='color:#999'>📈 Граф: Нет активного графика для экспорта</i><br>"
             
             self.status_bar.showMessage("✅ Отчеты экспортированы")
         except Exception as e:

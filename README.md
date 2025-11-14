@@ -2,9 +2,9 @@
 
 **Профессиональный инструмент для комплексного анализа качества кода Python проектов**
 
-> ✨ **v2.1:** Реальный анализ кода, работающий экспорт, улучшенный интерфейс, визуализация результатов
+> ✨ **v2.1:** Добавлена интерактивная граф-визуализация ошибок, улучшенный анализ, работающий экспорт, современный интерфейс
 
-![nAUDIT GUI](https://img.shields.io/badge/UI-PyQt6-blue) ![Python](https://img.shields.io/badge/Python-3.12-green) ![Status](https://img.shields.io/badge/Status-Production-brightgreen) ![Build](https://img.shields.io/badge/Build-130MB-orange)
+![nAUDIT GUI](https://img.shields.io/badge/UI-PyQt6-blue) ![Python](https://img.shields.io/badge/Python-3.12-green) ![Status](https://img.shields.io/badge/Status-Production-brightgreen) ![Version](https://img.shields.io/badge/Version-2.1.0-blue)
 
 ## 🎯 Возможности
 
@@ -15,6 +15,8 @@
 - **💡 Интеллектуальные рекомендации** — персонализованные советы по исправлению проблем
 - **📈 Подробные отчёты** — HTML и JSON отчёты с детальной информацией
 - **🖥️ Современный GUI** — минималистичный интерфейс на PyQt6
+- **🌳 Интерактивная визуализация** — два режима просмотра ошибок (дерево и граф) в одной вкладке
+- **🕸️ Граф-визуализация** — интерактивная сетевая визуализация всех файлов проекта
 - **📦 Готовый .exe файл** — локальная установка без зависимостей
 
 ## 📦 Требования

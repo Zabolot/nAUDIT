@@ -28,7 +28,7 @@ try:
     from n_audit.audit_engine import AuditEngine
     from n_audit.report_generator import ReportGenerator
     from n_audit.recommendations_engine import RecommendationsEngine
-    from n_audit.gui.tree_widget import ErrorTreeWidget
+    from n_audit.gui.error_visualization import ErrorVisualizationWidget
     from n_audit.gui.metrics_visualizer import MetricsVisualizer
 except ImportError:
     # Если импорт не работает (dev режим)
@@ -37,7 +37,7 @@ except ImportError:
     from n_audit.audit_engine import AuditEngine
     from n_audit.report_generator import ReportGenerator
     from n_audit.recommendations_engine import RecommendationsEngine
-    from n_audit.gui.tree_widget import ErrorTreeWidget
+    from n_audit.gui.error_visualization import ErrorVisualizationWidget
     from n_audit.gui.metrics_visualizer import MetricsVisualizer
 
 
@@ -131,8 +131,8 @@ class MainWindowV4(QMainWindow):
         self.results_widget = self._create_results_tab()
         self.tabs.addTab(self.results_widget, "📊 Результаты")
         
-        # Tab 2: Ошибки (дерево)
-        self.tree_widget = ErrorTreeWidget()
+        # Tab 2: Ошибки (дерево + граф)
+        self.tree_widget = ErrorVisualizationWidget()
         self.tabs.addTab(self.tree_widget, "🌳 Ошибки")
         
         # Tab 3: Визуализация

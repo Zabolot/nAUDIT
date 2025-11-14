@@ -30,14 +30,20 @@ def build_exe():
             shutil.rmtree(dir_path)
             print(f"  Удалена папка: {dir_path}")
     
+    # Определяем путь к pyinstaller
+    if sys.platform == "win32":
+        pyinstaller_path = project_root / "v.naudit" / "Scripts" / "pyinstaller.exe"
+    else:
+        pyinstaller_path = project_root / "v.naudit" / "bin" / "pyinstaller"
+    
     # Проверка PyInstaller
     print("\n[2/5] Проверка PyInstaller...")
     try:
-        result = subprocess.run(["pyinstaller", "--version"], capture_output=True, encoding="utf-8")
-        print(f"  PyInstaller версия: {result.stdout.strip()}")
+        result = subprocess.run([str(pyinstaller_path), "--version"], capture_output=True, encoding="utf-8")
+        print(f"  [OK] PyInstaller версия: {result.stdout.strip()}")
     except FileNotFoundError:
         print("  [!] PyInstaller не установлен!")
-        print("  Установите: pip install pyinstaller")
+        print(f"  Ожидается путь: {pyinstaller_path}")
         return False
     
     # Определение точки входа
@@ -56,6 +62,8 @@ def build_exe():
         "PyQt6.QtCore",
         "PyQt6.QtGui",
         "PyQt6.QtWidgets",
+        "PyQt6.QtWebEngineWidgets",
+        "PyQt6.QtWebEngineCore",
         "n_audit.core",
         "n_audit.code_analysis",
         "n_audit.security",
@@ -64,20 +72,27 @@ def build_exe():
         "n_audit.recommendations",
         "n_audit.visualizations",
         "n_audit.audit_manager",
-        "n_audit.gui.main_window",
+        "n_audit.gui.main_window_v4",
+        "n_audit.gui.tree_widget",
+        "n_audit.gui.graph_visualizer",
+        "n_audit.gui.error_visualization",
+        "n_audit.gui.metrics_visualizer",
         "n_audit.gui.styles",
+        "networkx",
+        "pyvis",
+        "matplotlib",
     ]
     
     # Построение команды PyInstaller
     cmd = [
-        "pyinstaller",
+        str(pyinstaller_path),
         "--onefile",  # Один файл вместо папки
         "--windowed",  # Без консольного окна
         "--name=nAUDIT",  # Имя приложения
         "--icon=NONE",  # Можно добавить иконку
         f"--specpath={project_root}",
         "--distpath", str(dist_dir),
-        "--buildpath", str(build_dir),
+        "--workpath", str(build_dir),
     ]
     
     # Добавление скрытых импортов
@@ -105,8 +120,8 @@ def build_exe():
     
     if exe_file.exists():
         file_size = exe_file.stat().st_size / (1024 * 1024)  # Размер в МБ
-        print(f"  ✓ Файл успешно создан: {exe_file}")
-        print(f"  ✓ Размер: {file_size:.2f} МБ")
+        print(f"  [OK] Файл успешно создан: {exe_file}")
+        print(f"  [OK] Размер: {file_size:.2f} МБ")
     else:
         print(f"  [!] Файл не найден: {exe_file}")
         return False
@@ -116,8 +131,8 @@ def build_exe():
     print("\n" + "=" * 60)
     print("Сборка завершена успешно!")
     print("=" * 60)
-    print(f"\n✓ Исполняемый файл: {exe_file}")
-    print(f"✓ Вы можете запустить приложение, дважды щелкнув по файлу")
+    print(f"\n[OK] Исполняемый файл: {exe_file}")
+    print(f"[OK] Вы можете запустить приложение, дважды щелкнув по файлу")
     print("\nДля распространения скопируйте nAUDIT.exe на целевой компьютер.")
     
     return True
@@ -135,6 +150,8 @@ a = Analysis(
         'PyQt6.QtCore',
         'PyQt6.QtGui',
         'PyQt6.QtWidgets',
+        'PyQt6.QtWebEngineWidgets',
+        'PyQt6.QtWebEngineCore',
         'n_audit.core',
         'n_audit.code_analysis',
         'n_audit.security',
@@ -143,6 +160,14 @@ a = Analysis(
         'n_audit.recommendations',
         'n_audit.visualizations',
         'n_audit.audit_manager',
+        'n_audit.gui.main_window_v4',
+        'n_audit.gui.tree_widget',
+        'n_audit.gui.graph_visualizer',
+        'n_audit.gui.error_visualization',
+        'n_audit.gui.metrics_visualizer',
+        'networkx',
+        'pyvis',
+        'matplotlib',
     ],
     hookspath=[],
     hooksconfig={{}},

@@ -822,12 +822,22 @@ class GraphVisualizerWidget(QWidget):
             net.toggle_physics(True)
             net.show_buttons(filter_=['physics'])
             
-            # Генерируем HTML
-            temp_file = Path(tempfile.gettempdir()) / "naudit_pyvis_graph.html"
-            net.show(str(temp_file))
-            
-            # Читаем HTML
-            html_content = temp_file.read_text(encoding='utf-8')
+            # Получаем HTML напрямую без создания файла
+            try:
+                # Для PyVis >= 0.3.2 используем get_html()
+                if hasattr(net, 'get_html'):
+                    html_content = net.get_html()
+                else:
+                    # Fallback для более старых версий
+                    temp_file = Path(tempfile.gettempdir()) / "naudit_pyvis_graph.html"
+                    net.show(str(temp_file))
+                    html_content = temp_file.read_text(encoding='utf-8')
+            except Exception as e:
+                print(f"[Warning] Ошибка при получении HTML: {e}")
+                # Финальный fallback - генерируем минимальный HTML
+                temp_file = Path(tempfile.gettempdir()) / "naudit_pyvis_graph.html"
+                net.write_html(str(temp_file))
+                html_content = temp_file.read_text(encoding='utf-8')
             
             # Добавляем JavaScript для интеграции с QWebChannel
             html_content = self._inject_qwebchannel_code(html_content)
@@ -861,7 +871,7 @@ class GraphVisualizerWidget(QWidget):
         return filtered
     
     def _calculate_positions(self, G: nx.Graph, filtered_nodes: List[str]) -> Dict[str, Tuple[float, float]]:
-        """Рассчитать позиции узлов с хорошим распределением"""
+        """Рассчитать позиции узлов с группировкой по папкам"""
         if len(filtered_nodes) == 0:
             return {}
         
@@ -872,8 +882,8 @@ class GraphVisualizerWidget(QWidget):
                 folder = self.nodes[node].folder
                 folder_nodes[folder].append(node)
             
-            # Используем spring layout для лучшего распределения
-            pos = nx.spring_layout(
+            # Вычисляем общий layout сначала
+            base_pos = nx.spring_layout(
                 G,
                 k=2.0,  # Расстояние между узлами
                 iterations=50,
@@ -881,14 +891,49 @@ class GraphVisualizerWidget(QWidget):
                 scale=100,
             )
             
-            # Применяем масштаб
+            # Теперь применяем коррекцию позиций для группировки по папкам
+            folder_count = len(folder_nodes)
+            folder_size = 200  # Размер каждой группы
+            
+            # Рассчитываем центры для каждой папки в сетке
+            cols = max(1, int(math.sqrt(folder_count)))
+            folder_centers = {}
+            for idx, folder in enumerate(sorted(folder_nodes.keys())):
+                col = idx % cols
+                row = idx // cols
+                center_x = col * (folder_size + 100)
+                center_y = row * (folder_size + 100)
+                folder_centers[folder] = (center_x, center_y)
+            
+            # Применяем коррекцию позиций с учетом групп папок
+            pos = {}
+            for node in filtered_nodes:
+                folder = self.nodes[node].folder
+                base_x, base_y = base_pos[node]
+                
+                # Нормализуем базовые позиции к локальным координатам группы
+                local_x = (base_x + 1) * (folder_size / 4)  # -1..1 -> 0..folder_size/2
+                local_y = (base_y + 1) * (folder_size / 4)
+                
+                # Смещаем к центру папки
+                center_x, center_y = folder_centers[folder]
+                final_x = center_x + local_x - (folder_size / 4)
+                final_y = center_y + local_y - (folder_size / 4)
+                
+                pos[node] = (final_x, final_y)
+            
+            # Применяем масштаб если нужно
             pos = {node: (x * self.scale_factor, y * self.scale_factor) 
                    for node, (x, y) in pos.items()}
+            
+            print(f"[GraphVisualizer] 🎯 Позиции: {len(pos)} узлов в {len(folder_nodes)} папках")
             
             return pos
         
         except Exception as e:
             print(f"[Error] Ошибка при расчёте позиций: {e}")
+            import traceback
+            traceback.print_exc()
             # Возвращаем простую сетку
             return self._generate_grid_positions(filtered_nodes)
     

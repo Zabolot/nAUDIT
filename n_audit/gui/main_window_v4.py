@@ -22,6 +22,10 @@ from datetime import datetime
 from pathlib import Path
 import sys
 import os
+import logging
+
+# Get logger
+logger = logging.getLogger(__name__)
 
 # Импортируем наши компоненты
 try:
@@ -50,14 +54,41 @@ class AuditWorker(QThread):
     def __init__(self, project_path):
         super().__init__()
         self.project_path = project_path
+        logger.info(f"AuditWorker created for: {project_path}")
     
     def run(self):
         try:
+            logger.info(f"Starting audit for: {self.project_path}")
+            self.progress.emit(f"Инициализация аудита...")
+            
             engine = AuditEngine()
+            logger.debug("AuditEngine created")
+            
+            self.progress.emit(f"Запуск анализа...")
+            logger.info(f"Running AuditEngine.audit()")
+            
             report = engine.audit(self.project_path)
+            
+            logger.info(f"Audit completed successfully")
+            logger.info(f"Report generated: {type(report)}")
+            
+            # Логируем результаты
+            if hasattr(report, 'metrics'):
+                if hasattr(report.metrics, 'code_issues'):
+                    logger.info(f"Code issues found: {len(report.metrics.code_issues)}")
+                if hasattr(report.metrics, 'security_issues'):
+                    logger.info(f"Security issues found: {len(report.metrics.security_issues)}")
+            
+            self.progress.emit(f"Завершено!")
             self.finished.emit(report)
+            
         except Exception as e:
-            self.error.emit(str(e))
+            error_msg = f"Ошибка аудита: {str(e)}"
+            logger.error(f"Critical error in audit: {error_msg}", exc_info=True)
+            logger.error(f"Exception type: {type(e).__name__}")
+            self.error.emit(error_msg)
+            self.progress.emit(f"Ошибка: {error_msg}")
+            raise  # Re-raise для дальнейшего анализа
 
 
 class MainWindowV4(QMainWindow):
@@ -274,7 +305,10 @@ class MainWindowV4(QMainWindow):
     def _on_audit(self):
         """Запустить аудит"""
         if not hasattr(self, 'selected_path'):
+            logger.warning("No path selected for audit")
             return
+        
+        logger.info(f"Audit button clicked, path: {self.selected_path}")
         
         self.progress_bar.setVisible(True)
         self.audit_button.setEnabled(False)
@@ -288,31 +322,60 @@ class MainWindowV4(QMainWindow):
     
     def _on_audit_finished(self, report):
         """Обработчик завершения аудита"""
-        self.current_report = report
-        self.progress_bar.setVisible(False)
-        self.audit_button.setEnabled(True)
-        self.export_button.setEnabled(True)
-        self.status_bar.showMessage("✅ Аудит завершен")
-        
-        # Обновляем все вкладки
-        self._update_results()
-        self._update_recommendations()
-        self._update_history()
-        
-        # Дерево ошибок
-        self.tree_widget.populate_from_report(report, project_root=self.selected_path)
-        
-        # Графики
-        self.visualizer.set_report(report)
+        try:
+            logger.info("Audit finished successfully")
+            self.current_report = report
+            self.progress_bar.setVisible(False)
+            self.audit_button.setEnabled(True)
+            self.export_button.setEnabled(True)
+            self.status_bar.showMessage("✅ Аудит завершен")
+            
+            logger.debug(f"Report type: {type(report)}")
+            logger.debug(f"Report dir: {dir(report)}")
+            
+            # Обновляем все вкладки
+            self._update_results()
+            self._update_recommendations()
+            self._update_history()
+            
+            # Дерево ошибок
+            logger.info("Populating tree widget with report")
+            self.tree_widget.populate_from_report(report, project_root=self.selected_path)
+            
+            # Графики
+            logger.info("Setting report in visualizer")
+            self.visualizer.set_report(report)
+            
+            logger.info("Audit process complete")
+            
+        except Exception as e:
+            logger.error(f"Error in _on_audit_finished: {e}", exc_info=True)
+            self._on_audit_error(f"Ошибка обработки результатов: {e}")
     
     def _on_audit_error(self, error):
         """Обработчик ошибки аудита"""
+        logger.error(f"Audit error: {error}")
+        
         self.progress_bar.setVisible(False)
         self.audit_button.setEnabled(True)
         self.status_bar.showMessage(f"❌ Ошибка: {error}")
         
-        msg = f"<b>Ошибка при аудите:</b><br>{error}"
-        self.project_info.setHtml(msg)
+        error_html = f"""
+        <b>❌ Ошибка при аудите:</b><br>
+        <pre style="color: red; font-family: monospace; white-space: pre-wrap;">
+        {error}
+        </pre>
+        <br>
+        <small style="color: gray;">
+        <b>Подсказка:</b> Подробности ошибки записаны в логи.<br>
+        Папка логов: {Path.home() / '.naudit' / 'logs'}<br>
+        <b>Стандартные причины:</b><br>
+        - В проекте есть файлы, которые невозможно разобрать<br>
+        - Недостаточно памяти для анализа большого проекта<br>
+        - Ошибка в анализаторе при обработке специальных синтаксисных конструкций
+        </small>
+        """
+        self.project_info.setHtml(error_html)
     
     def _on_export(self):
         """Экспортировать отчет и граф"""

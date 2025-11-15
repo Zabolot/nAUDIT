@@ -18,6 +18,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 from n_audit.gui.tree_widget import ErrorTreeWidget
 from n_audit.gui.graph_visualizer import GraphVisualizerWidget
+from pathlib import Path
 
 
 class ViewMode(Enum):
@@ -107,6 +108,13 @@ class ErrorVisualizationWidget(QWidget):
         # Связываем сигналы
         self.tree_widget.issue_selected.connect(self._on_issue_selected)
         self.graph_widget.file_selected.connect(self.file_selected.emit)
+        
+        # ✅ НОВОЕ: Синхронизация дерева и графа
+        # Когда выбран файл в дереве - выделяем в графе
+        self.tree_widget.file_selected.connect(self._on_tree_file_selected)
+        # Когда выбран файл в графе - выделяем в дереве
+        if hasattr(self.graph_widget, 'file_selected'):
+            self.graph_widget.file_selected.connect(self._on_graph_file_selected)
         
         # Устанавливаем начальную страницу
         self.stacked_widget.setCurrentIndex(0)
@@ -208,6 +216,77 @@ class ErrorVisualizationWidget(QWidget):
         """Обработать выбор ошибки из дерева"""
         if hasattr(issue, 'file'):
             self.file_selected.emit(issue.file)
+    
+    def _on_tree_file_selected(self, file_path: str):
+        """
+        Обработать выбор файла в дереве - выделить в графе
+        """
+        if not file_path:
+            return
+        
+        # Выделяем файл в текущем графе (если видимый)
+        if self.current_mode == ViewMode.GRAPH:
+            if hasattr(self.graph_widget, 'highlight_file'):
+                self.graph_widget.highlight_file(file_path)
+        elif self.current_mode == ViewMode.SPLIT:
+            if hasattr(self.graph_widget_split, 'highlight_file'):
+                self.graph_widget_split.highlight_file(file_path)
+        
+        print(f"[ErrorVisualizationWidget] 🔗 Синхронизация: дерево → граф ({file_path})")
+    
+    def _on_graph_file_selected(self, file_path: str):
+        """
+        Обработать выбор файла в графе - выделить в дереве
+        """
+        if not file_path:
+            return
+        
+        # Нормализуем путь
+        normalized_path = file_path.replace("\\", "/")
+        
+        # Ищем элемент файла в дереве и выделяем его
+        if self.current_mode == ViewMode.TREE:
+            self._highlight_file_in_tree(self.tree_widget, normalized_path)
+        elif self.current_mode == ViewMode.SPLIT:
+            self._highlight_file_in_tree(self.tree_widget_split, normalized_path)
+        
+        print(f"[ErrorVisualizationWidget] 🔗 Синхронизация: граф → дерево ({file_path})")
+    
+    def _highlight_file_in_tree(self, tree_widget, file_path: str):
+        """Выделить файл в дереве по пути"""
+        # Пробуем прямое совпадение
+        if file_path in tree_widget.file_tree_items:
+            file_item = tree_widget.file_tree_items[file_path]
+        else:
+            # Попытка нормализовать путь относительно project_root
+            try:
+                normalized = tree_widget._normalize_path(file_path, getattr(tree_widget, 'project_root', '.'))
+            except Exception:
+                normalized = file_path.replace('\\', '/')
+
+            file_item = None
+            if normalized in tree_widget.file_tree_items:
+                file_item = tree_widget.file_tree_items[normalized]
+            else:
+                # Попытка подобрать по basename
+                target_basename = Path(file_path).name
+                for k, itm in tree_widget.file_tree_items.items():
+                    if Path(k).name == target_basename or k.endswith(normalized) or normalized.endswith(k):
+                        file_item = itm
+                        print(f"[ErrorVisualizationWidget] ⚠️ Fallback matched tree key: {k} for {file_path}")
+                        break
+
+            if file_item is None:
+                print(f"[ErrorVisualizationWidget] ⚠️ Файл не найден в дереве: {file_path} (tried normalized: {normalized})")
+                return
+        tree = tree_widget.tree
+        
+        # Выделяем элемент
+        tree.setCurrentItem(file_item)
+        tree.scrollToItem(file_item)
+        tree.expandItem(file_item)
+        
+        print(f"[ErrorVisualizationWidget] ✅ Файл выделен в дереве: {file_path}")
     
     def get_current_mode(self) -> ViewMode:
         """Получить текущий режим просмотра"""

@@ -15,3 +15,5 @@ PyQt6-Charts
 PyInstaller>=6.0
 python-dotenv>=1.0
 requests>=2.28
+psutil>=5.9
+torch>=2.0.0

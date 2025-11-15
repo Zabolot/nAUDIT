@@ -1,0 +1,217 @@
+# ▶️ QUICK START - nAUDIT v2.7.1
+
+**Read this first!** Quick reference for getting started.
+
+---
+
+## 🎯 5-Minute Setup
+
+### Step 1: Verify System (2 min)
+```powershell
+cd G:\CODING\nAUDIT
+python diagnose_v2_7.py
+```
+
+**You should see:**
+```
+✅ Logging initialized
+✅ GPU Detection working
+✅ AuditEngine loaded
+✅ Tree Widget loaded
+✅ Graph Visualizer loaded
+```
+
+If you see errors → Check logs directory
+
+### Step 2: Run the GUI (1 min)
+```powershell
+cd dist
+.\nAUDIT.exe
+```
+
+**You should see:**
+- GUI window opens
+- Console shows startup messages (colorized)
+- Status bar shows ready
+
+### Step 3: Analyze Test Project (2 min)
+1. Click "Select Project Folder"
+2. Navigate to: `G:\CODING\nAUDIT\test_project_with_errors`
+3. Click "Analyze"
+4. Wait for completion
+
+**You should see:**
+- ✅ GUI responsive (no freezing)
+- ✅ Tree view populates with issues
+- ✅ Status shows "Analysis completed"
+- ✅ No crash, no error dialog
+- ✅ Shows: "6 code issues found" (or similar)
+
+---
+
+## 📍 Where Are the Logs?
+
+**Windows:**
+```powershell
+# Open log folder
+explorer $env:USERPROFILE\.naudit\logs
+
+# Or view latest log:
+Get-ChildItem $env:USERPROFILE\.naudit\logs -Filter "*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 1 | ForEach-Object { Get-Content $_.FullName -Tail 30 }
+```
+
+**Linux/macOS:**
+```bash
+# View logs
+ls -la ~/.naudit/logs/
+
+# View latest
+tail -30 ~/.naudit/logs/naudit_*.log
+```
+
+---
+
+## ✅ What to Check
+
+After running the test analysis:
+
+1. **GUI Status**
+   - [ ] No crashes
+   - [ ] Issues visible in tree
+   - [ ] Status shows "completed"
+
+2. **Log File**
+   - [ ] File exists in logs folder
+   - [ ] Contains [INFO] and [DEBUG] entries
+   - [ ] Shows audit start and completion
+
+3. **Error Handling**
+   - [ ] All 6 errors detected
+   - [ ] Each error displayed in tree
+   - [ ] No missing errors
+
+4. **GPU Status**
+   - [ ] Diagnostic shows optimization level
+   - [ ] Shows "MEDIUM" or similar
+   - [ ] GPU availability reported
+
+---
+
+## 🆘 Troubleshooting Quick Guide
+
+### "Program won't start"
+```powershell
+# Verify components
+python diagnose_v2_7.py
+
+# Check logs for errors
+Get-Content $env:USERPROFILE\.naudit\logs\naudit_*.log | Select-String ERROR
+```
+
+### "Analysis crashed"
+```powershell
+# View crash details
+tail -100 $env:USERPROFILE\.naudit\logs/naudit_*.log | grep ERROR
+```
+
+### "Logs not created"
+```powershell
+# Create log directory
+mkdir $env:USERPROFILE\.naudit\logs -Force
+
+# Try again
+python diagnose_v2_7.py
+```
+
+### "Errors not showing"
+```powershell
+# Check if issues were found
+Get-Content $env:USERPROFILE\.naudit\logs\naudit_*.log | Select-String "Found code_issues"
+
+# Check parsing
+Get-Content $env:USERPROFILE\.naudit\logs\naudit_*.log | Select-String "Error processing"
+```
+
+---
+
+## 📚 Documentation Files
+
+| File | Purpose |
+|------|---------|
+| `RELEASE_SUMMARY_v2_7_1.md` | Overview of what was fixed |
+| `TROUBLESHOOTING_AND_LOGGING_v2_7_1.md` | Complete user guide |
+| `TESTING_INSTRUCTIONS_v2_7_1.md` | Detailed testing scenarios |
+| `DOCUMENTATION_INDEX_v2_7_1.md` | All documentation links |
+
+---
+
+## 🎯 Success Indicators
+
+✅ **If you see:**
+- GUI loads without errors
+- Test project analyzes successfully  
+- Tree shows all 6 errors
+- Status says "completed"
+- Log file contains entries
+- Diagnostic shows MEDIUM optimization
+- No crashes or error dialogs
+
+❌ **If something fails:**
+- Check log file first
+- Run diagnostic tool
+- Read troubleshooting guide
+- Report with log file attached
+
+---
+
+## 🚀 Next Steps
+
+### If Everything Works ✅
+- Ready for production use
+- Can analyze real projects
+- Logs will capture all operations
+
+### If Something's Wrong ❌
+1. Check logs: `~/.naudit/logs/`
+2. Run diagnostic: `python diagnose_v2_7.py`
+3. Read: `TROUBLESHOOTING_AND_LOGGING_v2_7_1.md`
+4. Report with log file
+
+---
+
+## 📊 Quick Reference
+
+```
+Exe Location:           G:\CODING\nAUDIT\dist\nAUDIT.exe
+Test Project:           G:\CODING\nAUDIT\test_project_with_errors
+Log Directory:          ~/.naudit/logs/
+Diagnostic Tool:        python diagnose_v2_7.py
+Config Files:           None (auto-configured)
+```
+
+---
+
+## ⏱️ Typical Timeline
+
+| Task | Time |
+|------|------|
+| Verify system | 2 min |
+| Start GUI | 1 min |
+| Analyze project | 3-5 min |
+| Check logs | 2 min |
+| **Total** | **~10 min** |
+
+---
+
+## 🎉 You're Ready!
+
+Everything is set up and ready to use. Start with the 5-minute setup above, and you'll have a working analysis environment with full logging and error handling.
+
+**Good luck! 🚀**
+
+---
+
+For detailed information, see:
+- 📖 [TROUBLESHOOTING_AND_LOGGING_v2_7_1.md](./TROUBLESHOOTING_AND_LOGGING_v2_7_1.md)
+- 📋 [TESTING_INSTRUCTIONS_v2_7_1.md](./TESTING_INSTRUCTIONS_v2_7_1.md)
+- 📚 [DOCUMENTATION_INDEX_v2_7_1.md](./DOCUMENTATION_INDEX_v2_7_1.md)

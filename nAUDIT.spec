@@ -2,15 +2,15 @@
 
 
 a = Analysis(
-    ['G:\\CODING\\nAUDIT\\n_audit\\main.py'],
+    ['run_naudit_gui.py'],
     pathex=[],
     binaries=[],
     datas=[],
-    hiddenimports=['PyQt6', 'PyQt6.QtCore', 'PyQt6.QtGui', 'PyQt6.QtWidgets', 'PyQt6.QtWebEngineWidgets', 'plotly', 'plotly.graph_objects', 'pyvis', 'pyvis.network', 'networkx'],
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['PyInstaller', 'pip', 'setuptools'],
+    excludes=[],
     noarchive=False,
     optimize=0,
 )
@@ -26,7 +26,7 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=False,
+    upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,

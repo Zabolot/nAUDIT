@@ -14,6 +14,7 @@
 ✅ Иерархическое дерево графов (зависимости между файлами)
 """
 
+from __future__ import annotations
 import sys
 import tempfile
 from pathlib import Path
@@ -53,6 +54,17 @@ try:
     HAS_PYVIS = True
 except ImportError:
     HAS_PYVIS = False
+
+try:
+    from n_audit.gui.gpu_detector import GPUDetector, SystemResources
+    GPU_DETECTOR = GPUDetector()
+    SYSTEM_RESOURCES = GPU_DETECTOR.get_system_resources()
+    OPTIMIZATION_HINTS = GPU_DETECTOR.get_optimization_hints(SYSTEM_RESOURCES)
+    HAS_GPU_DETECTOR = True
+except ImportError:
+    HAS_GPU_DETECTOR = False
+    SYSTEM_RESOURCES = None
+    OPTIMIZATION_HINTS = None
 
 
 # ════════════════════════════════════════════════════════════════
@@ -871,16 +883,13 @@ class GraphVisualizerWidget(QWidget):
         return filtered
     
     def _calculate_positions(self, G: nx.Graph, filtered_nodes: List[str]) -> Dict[str, Tuple[float, float]]:
-        """Рассчитать позиции узлов с группировкой по папкам"""
+        """Рассчитать позиции узлов с группировкой по папкам (включая вложенные)"""
         if len(filtered_nodes) == 0:
             return {}
         
         try:
-            # Группируем узлы по папкам
-            folder_nodes = defaultdict(list)
-            for node in filtered_nodes:
-                folder = self.nodes[node].folder
-                folder_nodes[folder].append(node)
+            # Группируем узлы по иерархии папок (рекурсивно)
+            folder_hierarchy = self._build_folder_hierarchy(filtered_nodes)
             
             # Вычисляем общий layout сначала
             base_pos = nx.spring_layout(
@@ -891,42 +900,14 @@ class GraphVisualizerWidget(QWidget):
                 scale=100,
             )
             
-            # Теперь применяем коррекцию позиций для группировки по папкам
-            folder_count = len(folder_nodes)
-            folder_size = 200  # Размер каждой группы
-            
-            # Рассчитываем центры для каждой папки в сетке
-            cols = max(1, int(math.sqrt(folder_count)))
-            folder_centers = {}
-            for idx, folder in enumerate(sorted(folder_nodes.keys())):
-                col = idx % cols
-                row = idx // cols
-                center_x = col * (folder_size + 100)
-                center_y = row * (folder_size + 100)
-                folder_centers[folder] = (center_x, center_y)
-            
-            # Применяем коррекцию позиций с учетом групп папок
-            pos = {}
-            for node in filtered_nodes:
-                folder = self.nodes[node].folder
-                base_x, base_y = base_pos[node]
-                
-                # Нормализуем базовые позиции к локальным координатам группы
-                local_x = (base_x + 1) * (folder_size / 4)  # -1..1 -> 0..folder_size/2
-                local_y = (base_y + 1) * (folder_size / 4)
-                
-                # Смещаем к центру папки
-                center_x, center_y = folder_centers[folder]
-                final_x = center_x + local_x - (folder_size / 4)
-                final_y = center_y + local_y - (folder_size / 4)
-                
-                pos[node] = (final_x, final_y)
+            # Применяем иерархическую коррекцию позиций
+            pos = self._apply_hierarchical_clustering(base_pos, filtered_nodes, folder_hierarchy)
             
             # Применяем масштаб если нужно
             pos = {node: (x * self.scale_factor, y * self.scale_factor) 
                    for node, (x, y) in pos.items()}
             
-            print(f"[GraphVisualizer] 🎯 Позиции: {len(pos)} узлов в {len(folder_nodes)} папках")
+            print(f"[GraphVisualizer] 🎯 Позиции: {len(pos)} узлов с иерархической группировкой")
             
             return pos
         
@@ -936,6 +917,144 @@ class GraphVisualizerWidget(QWidget):
             traceback.print_exc()
             # Возвращаем простую сетку
             return self._generate_grid_positions(filtered_nodes)
+    
+    def _build_folder_hierarchy(self, nodes: List[str]) -> Dict:
+        """Строит иерархию папок для вложенной группировки
+        
+        Возвращает структуру типа:
+        {
+            'folder1/': {'size': 10, 'children': {'subfolder1/': {...}}},
+            'folder2/': {'size': 5, 'children': {}}
+        }
+        """
+        hierarchy = {}
+        
+        for node in nodes:
+            folder_path = self.nodes[node].folder
+            # Разбиваем путь на компоненты
+            parts = folder_path.strip('/').split('/')
+            
+            current = hierarchy
+            for i, part in enumerate(parts):
+                key = part + '/'
+                if key not in current:
+                    current[key] = {'size': 0, 'children': {}, 'depth': i}
+                current = current[key]['children']
+        
+        # Считаем размеры (количество узлов в каждой папке)
+        for node in nodes:
+            folder_path = self.nodes[node].folder
+            parts = folder_path.strip('/').split('/')
+            
+            current = hierarchy
+            for part in parts:
+                key = part + '/'
+                if key in current:
+                    current[key]['size'] += 1
+                    current = current[key]['children']
+        
+        return hierarchy
+    
+    def _apply_hierarchical_clustering(self, base_pos: Dict, filtered_nodes: List[str], 
+                                      hierarchy: Dict, parent_center=(0, 0), parent_size=1000) -> Dict:
+        """Применяет иерархическую кластеризацию к позициям узлов"""
+        pos = {}
+        
+        # Получаем папку каждого узла
+        folder_to_nodes = defaultdict(list)
+        for node in filtered_nodes:
+            folder = self.nodes[node].folder
+            folder_to_nodes[folder].append(node)
+        
+        # Рассчитываем позиции для каждого уровня иерархии
+        self._position_hierarchical_level(
+            hierarchy, 
+            folder_to_nodes, 
+            base_pos, 
+            pos, 
+            parent_center, 
+            parent_size
+        )
+        
+        return pos
+    
+    def _position_hierarchical_level(self, hierarchy: Dict, folder_to_nodes: Dict, 
+                                     base_pos: Dict, pos: Dict, parent_center: Tuple, 
+                                     parent_size: float, depth: int = 0):
+        """Рекурсивно позиционирует узлы на каждом уровне иерархии"""
+        if not hierarchy:
+            return
+        
+        # Определяем размер для текущего уровня
+        folder_count = len(hierarchy)
+        folder_display_size = max(100, parent_size / (folder_count + 1))
+        spacing = folder_display_size * 1.2
+        
+        # Расчитываем сетку для папок на этом уровне
+        cols = max(1, int(math.sqrt(folder_count)))
+        
+        for idx, (folder_key, folder_data) in enumerate(sorted(hierarchy.items())):
+            # Рассчитываем центр для этой папки
+            col = idx % cols
+            row = idx // cols
+            
+            folder_center_x = parent_center[0] + (col - cols/2 + 0.5) * spacing
+            folder_center_y = parent_center[1] + (row - int(folder_count/cols)/2) * spacing
+            folder_center = (folder_center_x, folder_center_y)
+            
+            # Если это листовая папка, размещаем узлы
+            if not folder_data['children']:
+                # Это папка без подпапок - размещаем все узлы в этой папке
+                folder_path = folder_key.rstrip('/') + '/'
+                nodes_in_folder = folder_to_nodes.get(folder_path, [])
+                
+                if nodes_in_folder:
+                    # Размещаем узлы вокруг центра папки
+                    self._position_nodes_in_folder(
+                        nodes_in_folder, 
+                        base_pos, 
+                        pos, 
+                        folder_center, 
+                        folder_display_size
+                    )
+            else:
+                # Это папка с подпапками - рекурсивно позиционируем подпапки
+                self._position_hierarchical_level(
+                    folder_data['children'],
+                    folder_to_nodes,
+                    base_pos,
+                    pos,
+                    folder_center,
+                    folder_display_size,
+                    depth + 1
+                )
+    
+    def _position_nodes_in_folder(self, nodes: List[str], base_pos: Dict, pos: Dict,
+                                  folder_center: Tuple, folder_size: float):
+        """Позиционирует узлы вокруг центра папки, используя базовые позиции"""
+        if not nodes:
+            return
+        
+        local_radius = folder_size / 3
+        
+        for i, node in enumerate(nodes):
+            # Получаем нормализованную базовую позицию
+            if node in base_pos:
+                base_x, base_y = base_pos[node]
+                # Нормализуем к локальным координатам
+                local_x = base_x * local_radius
+                local_y = base_y * local_radius
+            else:
+                # Fallback: размещаем в круг
+                angle = 2 * math.pi * i / len(nodes)
+                local_x = math.cos(angle) * local_radius
+                local_y = math.sin(angle) * local_radius
+            
+            # Применяем смещение к центру папки
+            final_x = folder_center[0] + local_x
+            final_y = folder_center[1] + local_y
+            
+            pos[node] = (final_x, final_y)
     
     def _generate_grid_positions(self, nodes: List[str]) -> Dict[str, Tuple[float, float]]:
         """Генерировать позиции сеткой"""
@@ -1136,6 +1255,29 @@ class GraphVisualizerWidget(QWidget):
             """
         
         self.web_view.page().runJavaScript(js_focus)
+    
+    def highlight_file(self, file_path: str):
+        """
+        Выделить файл в графе
+        
+        Args:
+            file_path: Путь к файлу для выделения
+        """
+        if not file_path:
+            return
+        
+        # Нормализуем путь
+        normalized_path = file_path.replace("\\", "/")
+        
+        # Проверяем что такой файл есть в графе
+        if normalized_path not in self.nodes:
+            print(f"[GraphVisualizer] ⚠️ Файл не найден в графе: {normalized_path}")
+            return
+        
+        # Фокусируемся на этом узле
+        self.focus_on_node(normalized_path)
+        
+        print(f"[GraphVisualizer] ✅ Выделен файл: {normalized_path}")
     
     def export_current_graph(self) -> Optional[Path]:
         """

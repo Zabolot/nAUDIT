@@ -168,52 +168,60 @@ class ErrorTreeWidget(QWidget):
         self.clear()
         self.project_root = project_root
         
-        if report.is_empty:
-            self.info_label.setText("✓ Ошибок не найдено!")
-            return
-        
         # Собираем все ошибки
         self.all_issues = []
         self.files_with_issues = {}
         
         # Ошибки кода
-        for issue in report.metrics.code_issues:
-            issue_info = CodeIssueInfo(
-                file_path=issue.file_path,
-                line_number=issue.line_number,
-                column=issue.column,
-                code=issue.code,
-                message=issue.message,
-                severity=issue.severity.name,
-                issue_type=issue.issue_type,
-                context=issue.context,
-                tool=issue.tool
-            )
-            self.all_issues.append(issue_info)
-            
-            # Группируем по файлам
-            if issue.file_path not in self.files_with_issues:
-                self.files_with_issues[issue.file_path] = []
-            self.files_with_issues[issue.file_path].append(issue_info)
+        if hasattr(report, 'code_issues'):
+            for issue in report.code_issues:
+                # Нормализуем путь
+                file_path = str(issue.get('file', '')).replace('\\', '/')
+                if not file_path:
+                    continue
+                
+                issue_info = CodeIssueInfo(
+                    file_path=file_path,
+                    line_number=issue.get('line', 0),
+                    column=issue.get('column', 0),
+                    code=issue.get('code', ''),
+                    message=issue.get('message', ''),
+                    severity=issue.get('severity', 'LOW'),
+                    issue_type=issue.get('type', 'code'),
+                    context=issue.get('context', ''),
+                    tool=issue.get('tool', '')
+                )
+                self.all_issues.append(issue_info)
+                
+                # Группируем по файлам
+                if file_path not in self.files_with_issues:
+                    self.files_with_issues[file_path] = []
+                self.files_with_issues[file_path].append(issue_info)
         
         # Ошибки безопасности
-        for issue in report.metrics.security_issues:
-            issue_info = CodeIssueInfo(
-                file_path=issue.file_path,
-                line_number=issue.line_number,
-                column=issue.column,
-                code=issue.code,
-                message=issue.message,
-                severity=issue.severity.name,
-                issue_type='security',
-                context=issue.context,
-                tool=issue.tool
-            )
-            self.all_issues.append(issue_info)
-            
-            if issue.file_path not in self.files_with_issues:
-                self.files_with_issues[issue.file_path] = []
-            self.files_with_issues[issue.file_path].append(issue_info)
+        if hasattr(report, 'security_issues'):
+            for issue in report.security_issues:
+                # Нормализуем путь
+                file_path = str(issue.get('file', '')).replace('\\', '/')
+                if not file_path:
+                    continue
+                
+                issue_info = CodeIssueInfo(
+                    file_path=file_path,
+                    line_number=issue.get('line', 0),
+                    column=issue.get('column', 0),
+                    code=issue.get('code', ''),
+                    message=issue.get('message', ''),
+                    severity=issue.get('severity', 'HIGH'),
+                    issue_type='security',
+                    context=issue.get('context', ''),
+                    tool=issue.get('tool', '')
+                )
+                self.all_issues.append(issue_info)
+                
+                if file_path not in self.files_with_issues:
+                    self.files_with_issues[file_path] = []
+                self.files_with_issues[file_path].append(issue_info)
         
         # Теперь строим дерево папок/файлов
         self._build_file_tree()
@@ -221,7 +229,12 @@ class ErrorTreeWidget(QWidget):
         # Обновляем статистику
         total_issues = len(self.all_issues)
         total_files = len(self.files_with_issues)
-        self.info_label.setText(f"📊 Анализ завершён: {total_issues} ошибок в {total_files} файлах")
+        
+        if total_issues == 0:
+            self.info_label.setText(f"✓ Анализ завершён - ошибок не найдено!")
+        else:
+            self.info_label.setText(f"📊 Анализ завершён: {total_issues} ошибок в {total_files} файлах")
+        
         self.stats_label.setText(f"Файлов с ошибками: {total_files} | Всего ошибок: {total_issues}")
     
     def _build_file_tree(self):

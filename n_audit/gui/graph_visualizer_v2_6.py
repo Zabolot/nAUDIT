@@ -776,8 +776,13 @@ class GraphVisualizerWidget(QWidget):
             net = Network(
                 height='600px',
                 directed=True,
-                physics=True,
             )
+            
+            # Включаем физику симуляции (если поддерживается)
+            try:
+                net.physics.enabled = True
+            except:
+                pass  # Старая версия PyVis может не поддерживать
             
             # Добавляем узлы
             for file_path in filtered_nodes:
@@ -795,13 +800,16 @@ class GraphVisualizerWidget(QWidget):
                 color = node.get_node_color(self.folder_colors)
                 size = max(15, min(50, 15 + node.errors_count * 2))
                 
+                # Получаем папку для группировки
+                folder_group = node.folder if hasattr(node, 'folder') else 'root'
+                
                 net.add_node(
                     file_path,
                     label=label,
                     title=title,
                     color=color,
                     size=size,
-                    physics=True,
+                    group=folder_group,  # Группируем по папкам
                 )
             
             # Добавляем связи

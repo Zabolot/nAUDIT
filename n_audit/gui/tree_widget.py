@@ -48,6 +48,7 @@ class ErrorTreeWidget(QWidget):
     """
     
     issue_selected = pyqtSignal(CodeIssueInfo)  # Сигнал при выборе ошибки
+    file_selected = pyqtSignal(str)  # Сигнал при выборе файла (для синхронизации с графом)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -352,6 +353,8 @@ class ErrorTreeWidget(QWidget):
         # Выбран файл
         self.current_selected_file = file_path
         self._update_issues_list(file_path)
+        # Эмитируем сигнал для синхронизации с графом
+        self.file_selected.emit(file_path)
     
     def _update_issues_list(self, file_path: str):
         """Обновить список ошибок для файла"""

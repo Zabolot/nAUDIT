@@ -143,6 +143,11 @@ class ErrorVisualizationWidget(QWidget):
         self.stacked_widget.setCurrentIndex(1)
         self._update_buttons()
         self.view_mode_changed.emit(ViewMode.GRAPH)
+        
+        # Принудительный refresh когда переключаемся на граф
+        print("[ErrorVisualizationWidget] ⚠ Переключаюсь на граф - refresh...")
+        if hasattr(self.graph_widget, '_render_graph'):
+            self.graph_widget._render_graph()
     
     def _on_split_mode(self):
         """Переключиться на режим оба"""
@@ -153,6 +158,11 @@ class ErrorVisualizationWidget(QWidget):
         self.stacked_widget.setCurrentIndex(2)
         self._update_buttons()
         self.view_mode_changed.emit(ViewMode.SPLIT)
+        
+        # Принудительный refresh при переключении на split
+        print("[ErrorVisualizationWidget] ⚠ Переключаюсь на split - refresh...")
+        if hasattr(self.graph_widget_split, '_render_graph'):
+            self.graph_widget_split._render_graph()
     
     def _update_buttons(self):
         """Обновить состояние кнопок"""

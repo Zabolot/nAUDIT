@@ -328,7 +328,11 @@ class MainWindowV4(QMainWindow):
             # Экспортируем график если он доступен
             graph_path = None
             if self.tree_widget and hasattr(self.tree_widget, 'graph_widget'):
-                graph_path = self.tree_widget.graph_widget.export_current_graph()
+                try:
+                    graph_path = self.tree_widget.graph_widget.export_current_graph()
+                except Exception as e:
+                    print(f"[Export] Ошибка при экспорте графа: {e}")
+                    graph_path = None
             
             msg = f"""
             <b>✅ Отчеты успешно сохранены:</b><br><br>

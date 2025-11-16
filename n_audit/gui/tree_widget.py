@@ -761,3 +761,21 @@ class ErrorTreeWidget(QWidget):
             max_severity = self._get_max_severity(issues)
             max_level = severity_order.get(max_severity, 0)
             item.setHidden(max_level < min_level)
+    
+    def select_item_by_path(self, file_path: str):
+        """🔄 СИНХРОНИЗАЦИЯ: Выделить элемент в дереве по пути файла (из графа)
+        
+        Это вызывается из графа когда пользователь кликнул на узел графа.
+        """
+        normalized_path = str(file_path).replace("\\", "/")
+        logger.info(f"[TreeWidget] 🎯 Выделяю файл из графа: {normalized_path}")
+        
+        # Ищем элемент в дереве
+        if normalized_path in self.file_tree_items:
+            item = self.file_tree_items[normalized_path]
+            self.tree.setCurrentItem(item)
+            self.tree.scrollToItem(item, QTreeWidget.ScrollHint.PositionAtCenter)
+            self._on_tree_item_selected()
+            logger.info(f"[TreeWidget] ✅ Файл выделен: {normalized_path}")
+        else:
+            logger.warning(f"[TreeWidget] ⚠️ Файл не найден в дереве: {normalized_path}")

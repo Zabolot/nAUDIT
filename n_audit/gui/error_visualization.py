@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from n_audit.gui.tree_widget import ErrorTreeWidget
-from n_audit.gui.graph_visualizer import GraphVisualizerWidget
+from n_audit.gui.graph_visualizer_v2_7 import GraphVisualizerWidget
 from pathlib import Path
 
 
@@ -219,12 +219,12 @@ class ErrorVisualizationWidget(QWidget):
     
     def _on_tree_file_selected(self, file_path: str):
         """
-        Обработать выбор файла в дереве - выделить в графе
+        🔄 СИНХРОНИЗАЦИЯ: Файл выбран в дереве - выделить в графе
         """
         if not file_path:
             return
         
-        # Выделяем файл в текущем графе (если видимый)
+        # Выделяем файл в графе
         if self.current_mode == ViewMode.GRAPH:
             if hasattr(self.graph_widget, 'highlight_file'):
                 self.graph_widget.highlight_file(file_path)
@@ -232,25 +232,29 @@ class ErrorVisualizationWidget(QWidget):
             if hasattr(self.graph_widget_split, 'highlight_file'):
                 self.graph_widget_split.highlight_file(file_path)
         
-        print(f"[ErrorVisualizationWidget] 🔗 Синхронизация: дерево → граф ({file_path})")
+        import logging
+        logging.getLogger(__name__).info(f"[Sync] 🔗 Дерево→Граф: {file_path}")
     
     def _on_graph_file_selected(self, file_path: str):
         """
-        Обработать выбор файла в графе - выделить в дереве
+        🔄 СИНХРОНИЗАЦИЯ: Файл выбран в графе - выделить в дереве
         """
         if not file_path:
             return
         
         # Нормализуем путь
-        normalized_path = file_path.replace("\\", "/")
+        normalized_path = str(file_path).replace("\\", "/")
         
-        # Ищем элемент файла в дереве и выделяем его
+        # Выделяем в дереве
         if self.current_mode == ViewMode.TREE:
-            self._highlight_file_in_tree(self.tree_widget, normalized_path)
+            if hasattr(self.tree_widget, 'select_item_by_path'):
+                self.tree_widget.select_item_by_path(normalized_path)
         elif self.current_mode == ViewMode.SPLIT:
-            self._highlight_file_in_tree(self.tree_widget_split, normalized_path)
+            if hasattr(self.tree_widget_split, 'select_item_by_path'):
+                self.tree_widget_split.select_item_by_path(normalized_path)
         
-        print(f"[ErrorVisualizationWidget] 🔗 Синхронизация: граф → дерево ({file_path})")
+        import logging
+        logging.getLogger(__name__).info(f"[Sync] 🔗 Граф→Дерево: {normalized_path}")
     
     def _highlight_file_in_tree(self, tree_widget, file_path: str):
         """Выделить файл в дереве по пути"""

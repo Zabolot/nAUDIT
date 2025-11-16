@@ -31,6 +31,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
     QLabel, QSlider, QCheckBox, QComboBox, QSpinBox, QMessageBox
 )
+from PyQt6.QtWidgets import QProgressDialog, QApplication
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QUrl, QObject, pyqtSlot, QThread, QSize
 from PyQt6.QtCore import QEvent
 from PyQt6.QtWebEngineWidgets import QWebEngineView
@@ -54,6 +55,13 @@ try:
     HAS_PYVIS = True
 except ImportError:
     HAS_PYVIS = False
+
+try:
+    import torch
+    HAS_TORCH = True
+except Exception:
+    torch = None
+    HAS_TORCH = False
 
 try:
     from n_audit.gui.gpu_detector import GPUDetector, SystemResources
@@ -201,6 +209,8 @@ class GraphVisualizerWidget(QWidget):
     
     file_selected = pyqtSignal(str)
     focus_on_file = pyqtSignal(str)  # Сигнал для синхронизации с деревом
+    render_progress = pyqtSignal(int, str)  # процент, сообщение
+    render_finished = pyqtSignal(str)  # html content
     
     def __init__(self):
         super().__init__()
@@ -313,6 +323,8 @@ class GraphVisualizerWidget(QWidget):
         self.web_view.page().setWebChannel(self.web_channel)
         
         layout.addWidget(self.web_view)
+        # Прогресс-диалог (создаётся лениво при рендеринге)
+        self.progress_dialog = None
         self.setLayout(layout)
     
     # ════════════════════════════════════════════════════════════════
@@ -340,20 +352,23 @@ class GraphVisualizerWidget(QWidget):
         return False
     
     def _get_folder_group(self, file_path: str) -> str:
-        """Получить группу папки (первый уровень папок)"""
-        path = Path(file_path)
-        parts = path.parts
-        
-        # Пропускаем, если файл в корне
-        if len(parts) <= 1:
-            return "root"
-        
-        # Возвращаем первую папку, которая не исключена
-        for part in parts[:-1]:
-            if part not in EXCLUDE_FOLDERS:
-                return part
-        
-        return "other"
+        """Получить группу папки — полный относительный путь к папке с завершающим '/'.
+
+        Пример: 'src/utils/helper.py' -> 'src/utils/'
+        Это позволяет корректно группировать вложенные папки.
+        """
+        p = Path(file_path)
+        parent = p.parent
+        if str(parent) in ('.', ''):
+            return 'root/'
+
+        # Строим путь исключая компоненты из EXCLUDE_FOLDERS
+        parts = [part for part in parent.parts if part not in EXCLUDE_FOLDERS]
+        if not parts:
+            return 'root/'
+
+        folder = '/'.join(parts).strip('/') + '/'
+        return folder
     
     def _assign_folder_colors(self):
         """Присвоить цвета папкам на основе проекта"""
@@ -385,7 +400,9 @@ class GraphVisualizerWidget(QWidget):
             
             saturation = 70
             lightness = 55
-            self.folder_colors[folder] = f"hsl({hue}, {saturation}%, {lightness}%)"
+            # ensure keys end with '/'
+            key = folder if str(folder).endswith('/') else f"{folder}/"
+            self.folder_colors[key] = f"hsl({hue}, {saturation}%, {lightness}%)"
         
         print(f"[GraphVisualizer] 🎨 Назначены цвета {len(self.folder_colors)} папкам")
     
@@ -463,15 +480,31 @@ class GraphVisualizerWidget(QWidget):
         # СОБРАТЬ ИНФОРМАЦИЮ ОБ ОШИБКАХ
         # ═══════════════════════════════════════
         
-        # Ошибки кода
+        # Ошибки кода — поддерживаем несколько форматов отчёта
+        code_issues = None
         if hasattr(report, 'code_issues'):
-            for issue in report.code_issues:
-                file_path = str(issue.get('file', '')).replace('\\', '/')
-                
+            code_issues = report.code_issues
+        elif hasattr(report, 'metrics') and hasattr(report.metrics, 'code_issues'):
+            code_issues = report.metrics.code_issues
+
+        if code_issues:
+            for issue in code_issues:
+                # issue может быть dict или объект
+                try:
+                    if isinstance(issue, dict):
+                        file_path = str(issue.get('file', '')).replace('\\', '/')
+                        severity = issue.get('severity', 'LOW')
+                    else:
+                        file_path = str(getattr(issue, 'file', getattr(issue, 'path', ''))).replace('\\', '/')
+                        severity = getattr(issue, 'severity', 'LOW')
+                except Exception:
+                    file_path = ''
+                    severity = 'LOW'
+
                 # Пропускаем исключённые пути
                 if not file_path or self._is_excluded_path(file_path):
                     continue
-                
+
                 if file_path not in files_info:
                     files_info[file_path] = {
                         'errors': 0,
@@ -479,11 +512,10 @@ class GraphVisualizerWidget(QWidget):
                         'error_types': defaultdict(int),
                         'lines': 0,
                     }
-                
+
                 files_info[file_path]['errors'] += 1
-                severity = issue.get('severity', 'LOW')
                 files_info[file_path]['error_types'][severity] += 1
-                
+
                 # Обновляем max_severity
                 severity_order = {'CRITICAL': 4, 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1}
                 current_order = severity_order.get(files_info[file_path]['max_severity'], 0)
@@ -492,13 +524,28 @@ class GraphVisualizerWidget(QWidget):
                     files_info[file_path]['max_severity'] = severity
         
         # Проблемы безопасности
+        security_issues = None
         if hasattr(report, 'security_issues'):
-            for issue in report.security_issues:
-                file_path = str(issue.get('file', '')).replace('\\', '/')
-                
+            security_issues = report.security_issues
+        elif hasattr(report, 'metrics') and hasattr(report.metrics, 'security_issues'):
+            security_issues = report.metrics.security_issues
+
+        if security_issues:
+            for issue in security_issues:
+                try:
+                    if isinstance(issue, dict):
+                        file_path = str(issue.get('file', '')).replace('\\', '/')
+                        severity = issue.get('severity', 'HIGH')
+                    else:
+                        file_path = str(getattr(issue, 'file', getattr(issue, 'path', ''))).replace('\\', '/')
+                        severity = getattr(issue, 'severity', 'HIGH')
+                except Exception:
+                    file_path = ''
+                    severity = 'HIGH'
+
                 if not file_path or self._is_excluded_path(file_path):
                     continue
-                
+
                 if file_path not in files_info:
                     files_info[file_path] = {
                         'errors': 0,
@@ -506,11 +553,10 @@ class GraphVisualizerWidget(QWidget):
                         'error_types': defaultdict(int),
                         'lines': 0,
                     }
-                
+
                 files_info[file_path]['errors'] += 1
-                severity = issue.get('severity', 'HIGH')  # Безопасность - по умолчанию HIGH
                 files_info[file_path]['error_types'][severity] += 1
-                
+
                 # Обновляем max_severity
                 severity_order = {'CRITICAL': 4, 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1}
                 current_order = severity_order.get(files_info[file_path]['max_severity'], 0)
@@ -642,6 +688,11 @@ class GraphVisualizerWidget(QWidget):
             
             # Вычисляем позиции с лучшей раскладкой
             pos = self._calculate_positions(G, filtered_nodes)
+            # Сохраним последние позиции для возможности фокуса
+            try:
+                self._last_pos = pos
+            except Exception:
+                self._last_pos = {}
             
             # Подготавливаем данные для Plotly
             edge_trace_list = []
@@ -669,6 +720,8 @@ class GraphVisualizerWidget(QWidget):
             node_color = []
             node_hover_text = []
             
+            # customdata хранит реальный путь — используем для callback'ов
+            customdata = []
             for file_path in filtered_nodes:
                 x, y = pos.get(file_path, (0, 0))
                 node_x.append(x)
@@ -697,6 +750,8 @@ class GraphVisualizerWidget(QWidget):
                 hover += f"Папка: {node.folder}<br>"
                 hover += f"Зависимостей: {len(node.depends_on)}"
                 node_hover_text.append(hover)
+                # customdata сохраняет путь
+                customdata.append(file_path)
             
             # Trace узлов
             node_trace = go.Scatter(
@@ -708,6 +763,7 @@ class GraphVisualizerWidget(QWidget):
                 textfont=dict(size=10, color='white'),
                 hovertext=node_hover_text,
                 hoverinfo='text',
+                customdata=customdata,
                 marker=dict(
                     size=node_size,
                     color=node_color,
@@ -891,14 +947,28 @@ class GraphVisualizerWidget(QWidget):
             # Группируем узлы по иерархии папок (рекурсивно)
             folder_hierarchy = self._build_folder_hierarchy(filtered_nodes)
             
-            # Вычисляем общий layout сначала
-            base_pos = nx.spring_layout(
-                G,
-                k=2.0,  # Расстояние между узлами
-                iterations=50,
-                seed=42,
-                scale=100,
-            )
+            # Попытка использовать GPU-ускорённый layout если доступен
+            use_gpu = HAS_TORCH and torch is not None and torch.cuda.is_available() and len(filtered_nodes) > 50
+            if use_gpu:
+                try:
+                    base_pos = self._compute_layout_torch(G, filtered_nodes)
+                except Exception as e:
+                    print(f"[GraphVisualizer] ⚠️ GPU layout failed, fallback to networkx: {e}")
+                    base_pos = nx.spring_layout(
+                        G,
+                        k=2.0,  # Расстояние между узлами
+                        iterations=50,
+                        seed=42,
+                        scale=100,
+                    )
+            else:
+                base_pos = nx.spring_layout(
+                    G,
+                    k=2.0,  # Расстояние между узлами
+                    iterations=50,
+                    seed=42,
+                    scale=100,
+                )
             
             # Применяем иерархическую коррекцию позиций
             pos = self._apply_hierarchical_clustering(base_pos, filtered_nodes, folder_hierarchy)
@@ -1069,6 +1139,68 @@ class GraphVisualizerWidget(QWidget):
             positions[node] = (x, y)
         
         return positions
+
+    def _compute_layout_torch(self, G, filtered_nodes: List[str]) -> Dict[str, Tuple[float, float]]:
+        """Простая GPU-ускоренная версия force-directed layout на PyTorch.
+
+        Возвращает словарь node -> (x, y). Требует установленный torch и доступный CUDA.
+        Это упрощённая инициализация для ускорения расчёта на больших графах.
+        """
+        device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+
+        # Построим индекс узлов
+        idx = {node: i for i, node in enumerate(filtered_nodes)}
+        n = len(filtered_nodes)
+
+        # Инициалные позиции
+        pos = torch.randn((n, 2), device=device, dtype=torch.float32) * 0.01
+
+        # Соберём ребра (индексы)
+        edges = []
+        for u, v in G.edges():
+            if u in idx and v in idx:
+                edges.append((idx[u], idx[v]))
+
+        if edges:
+            edges_t = torch.tensor(edges, dtype=torch.long, device=device).t()
+        else:
+            edges_t = None
+
+        # Простая итеративная симуляция
+        iterations = 120
+        lr = 0.08
+        for it in range(iterations):
+            # Расстояния между всеми парами
+            diff = pos.unsqueeze(1) - pos.unsqueeze(0)  # n x n x 2
+            dist = torch.clamp(torch.norm(diff, dim=2, keepdim=False), min=1e-4)
+
+            # Отталкивание
+            inv_dist = (1.0 / (dist * dist)).unsqueeze(2)
+            rep = (diff * inv_dist).sum(dim=1)
+
+            # Притяжение по ребрам
+            attr = torch.zeros_like(pos)
+            if edges_t is not None:
+                src = edges_t[0]
+                tgt = edges_t[1]
+                vec = pos[tgt] - pos[src]
+                dist_e = torch.clamp(torch.norm(vec, dim=1, keepdim=True), min=1e-4)
+                direction = vec / dist_e
+                # Накопим
+                attr.index_add_(0, src, direction)
+                attr.index_add_(0, tgt, -direction)
+
+            # Обновление позиций
+            disp = rep - attr
+            pos = pos + lr * disp
+            # damping
+            pos = pos * 0.95
+
+        # Переносим на CPU и формируем словарь
+        pos_cpu = pos.cpu().numpy()
+        scale = 100.0
+        result = {node: (float(pos_cpu[idx[node], 0] * scale), float(pos_cpu[idx[node], 1] * scale)) for node in filtered_nodes}
+        return result
     
     def _inject_qwebchannel_code(self, html_content: str) -> str:
         """Инжектировать JavaScript для QWebChannel интеграции"""
@@ -1092,13 +1224,37 @@ class GraphVisualizerWidget(QWidget):
             if (plot && plot.on) {
                 plot.on('plotly_click', function(data) {
                     var point = data.points[0];
-                    var text = point.text;
-                    if (window.graph_bridge) {
-                        window.graph_bridge.onNodeClicked(text);
+                    var filePath = null;
+                    try {
+                        if (point.customdata && point.customdata.length) {
+                            filePath = point.customdata[0];
+                        } else if (point.text) {
+                            filePath = point.text;
+                        }
+                    } catch(e) { console.log('extract filePath failed', e); }
+
+                    if (filePath && window.graph_bridge) {
+                        window.graph_bridge.onNodeClicked(String(filePath));
                     }
-                    console.log('Clicked node:', text);
+                    console.log('Clicked node:', filePath);
                 });
             }
+
+            // Добавляем обработчики кликов для PyVis (если существует глобальный объект network)
+            try {
+                if (window.network && window.network.on) {
+                    window.network.on('click', function(params) {
+                        try {
+                            if (params.nodes && params.nodes.length > 0) {
+                                var id = params.nodes[0];
+                                if (window.graph_bridge) {
+                                    window.graph_bridge.onNodeClicked(String(id));
+                                }
+                            }
+                        } catch(e) { console.log('pyvis click handler error', e); }
+                    });
+                }
+            } catch(e) { /* ignore */ }
         });
         </script>
         """
@@ -1152,24 +1308,64 @@ class GraphVisualizerWidget(QWidget):
     def _render_graph(self):
         """Основной метод рендеринга графа"""
         print(f"[GraphVisualizer v2.6] 🎨 Рендеринг {self.current_render_mode.value}...")
-        
+
+        # Показать индикатор прогресса (лениво создаётся)
+        if self.progress_dialog is None:
+            try:
+                self.progress_dialog = QProgressDialog(
+                    "Рендеринг графа... Пожалуйста, подождите.",
+                    "Отмена",
+                    0,
+                    0,
+                    self
+                )
+                self.progress_dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+                self.progress_dialog.setMinimumDuration(200)
+                self.progress_dialog.setCancelButtonText("Отмена")
+            except Exception:
+                # В случае проблем с QProgressDialog — безопасно игнорируем
+                self.progress_dialog = None
+
         try:
+            if self.progress_dialog:
+                try:
+                    self.progress_dialog.show()
+                    # Обработать события, чтобы диалог отрисовался
+                    try:
+                        QApplication.processEvents()
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+
             if self.current_render_mode == GraphRenderMode.PLOTLY:
                 html_content = self._generate_plotly_html()
             else:
                 html_content = self._generate_pyvis_html()
-            
+
             # Загружаем HTML в WebView
             self.web_view.setHtml(html_content)
-            
+
             print(f"[GraphVisualizer v2.6] ✅ Граф успешно отрендерен")
-        
+
         except Exception as e:
             print(f"[Error] Ошибка при рендеринге: {e}")
             import traceback
             traceback.print_exc()
             error_html = self._generate_error_html(f"Ошибка: {str(e)}")
-            self.web_view.setHtml(error_html)
+            try:
+                self.web_view.setHtml(error_html)
+            except Exception:
+                pass
+
+        finally:
+            # Закрываем диалог прогресса если он был показан
+            if self.progress_dialog:
+                try:
+                    self.progress_dialog.close()
+                except Exception:
+                    pass
+                self.progress_dialog = None
     
     # ════════════════════════════════════════════════════════════════
     # ОБРАБОТЧИКИ СИГНАЛОВ И СЛОТОВ
@@ -1236,24 +1432,44 @@ class GraphVisualizerWidget(QWidget):
         if file_path not in self.nodes:
             print(f"[Warning] Файл {file_path} не найден в графе")
             return
-        
-        # Генерируем JavaScript для фокуса
+        # Пытаемся получить позиции из последнего расчёта
+        pos = getattr(self, '_last_pos', None)
         if self.current_render_mode == GraphRenderMode.PLOTLY:
-            js_focus = f"""
-            var plot = document.querySelector('.plotly-graph-div');
-            if (plot) {{
-                Plotly.restyle(plot, {{'marker.opacity': 0.3}});
-            }}
-            """
+            if pos and file_path in pos:
+                x, y = pos[file_path]
+                # небольшой диапазон вокруг узла
+                dx = 50.0
+                dy = 50.0
+                js_focus = f"""
+                (function() {{
+                    var plot = document.querySelector('.plotly-graph-div');
+                    if (!plot) return;
+                    try {{
+                        Plotly.restyle(plot, {{'marker.opacity': 0.25}});
+                        Plotly.restyle(plot, {{'marker.opacity': 1}}, [plot.data.length-1]);
+                        Plotly.relayout(plot, {{
+                            'xaxis.range': [{x - dx}, {x + dx}],
+                            'yaxis.range': [{y - dy}, {y + dy}]
+                        }});
+                    }} catch(e) {{ console.log('focus error', e); }}
+                }})();
+                """
+            else:
+                js_focus = """
+                (function() {
+                    var plot = document.querySelector('.plotly-graph-div');
+                    if (!plot) return;
+                    try { Plotly.restyle(plot, {'marker.opacity': 0.3}); } catch(e){}
+                })();
+                """
         else:
             js_focus = f"""
             // PyVis фокус
             if (window.network) {{
-                window.network.selectNodes(['{file_path}']);
-                window.network.fit();
+                try {{ window.network.selectNodes(['{file_path}']); window.network.fit(); }} catch(e){{ console.log('pyvis focus', e); }}
             }}
             """
-        
+
         self.web_view.page().runJavaScript(js_focus)
     
     def highlight_file(self, file_path: str):

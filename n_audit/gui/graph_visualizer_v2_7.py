@@ -1514,37 +1514,92 @@ class GraphVisualizerWidget(QWidget):
         pos = getattr(self, '_last_pos', {})
         
         if self.current_render_mode == GraphRenderMode.PLOTLY:
-            if pos and file_path in pos:
-                x, y = pos[file_path]
-                dx, dy = 50.0, 50.0
-                js = f"""
-                (function() {{
-                    var plot = document.querySelector('.plotly-graph-div');
-                    if (!plot) return;
-                    try {{
-                        Plotly.restyle(plot, {{'marker.opacity': 0.25}});
-                        Plotly.restyle(plot, {{'marker.opacity': 1}}, [plot.data.length-1]);
-                        Plotly.relayout(plot, {{
-                            'xaxis.range': [{x - dx}, {x + dx}],
-                            'yaxis.range': [{y - dy}, {y + dy}]
-                        }});
-                    }} catch(e) {{}}
-                }})();
-                """
-            else:
-                js = """(function() {
-                    var plot = document.querySelector('.plotly-graph-div');
-                    if (!plot) return;
-                    try { Plotly.restyle(plot, {'marker.opacity': 0.25}); } catch(e){}
-                })();"""
-        else:
+            # Enhanced Plotly centering + visible selection marker
+            # We search for the node trace, find the index by customdata/text, add a selection trace and relayout to center
             js = f"""
-            if (window.network) {{
-                try {{ 
-                    window.network.selectNodes(['{file_path}']); 
-                    window.network.fit(); 
-                }} catch(e){{}}
-            }}
+            (function() {{
+                var plot = document.querySelector('.plotly-graph-div');
+                if (!plot) return;
+                try {{
+                    var filePath = {json.dumps(file_path)};
+
+                    // Найти trace с узлами (по имени 'node' или последний trace)
+                    var nodeTraceIndex = -1;
+                    for (var i=0;i<plot.data.length;i++) {{
+                        var name = plot.data[i] && plot.data[i].name;
+                        if (name && String(name).toLowerCase().indexOf('node') !== -1) {{ nodeTraceIndex = i; break; }}
+                    }}
+                    if (nodeTraceIndex === -1) nodeTraceIndex = plot.data.length - 1;
+
+                    var xs = plot.data[nodeTraceIndex].x || [];
+                    var ys = plot.data[nodeTraceIndex].y || [];
+                    var cds = plot.data[nodeTraceIndex].customdata || plot.data[nodeTraceIndex].text || [];
+
+                    var idx = -1;
+                    for (var k=0;k<cds.length;k++) {{ if (cds[k] === filePath || (typeof cds[k] === 'string' && cds[k].indexOf(filePath) !== -1)) {{ idx = k; break; }} }}
+                    if (idx === -1) {{
+                        var txt = plot.data[nodeTraceIndex].text || [];
+                        for (var k=0;k<txt.length;k++) {{ if (txt[k] && String(txt[k]).indexOf(filePath) !== -1) {{ idx = k; break; }} }}
+                    }}
+
+                    if (idx !== -1) {{
+                        var x = xs[idx];
+                        var y = ys[idx];
+
+                        var minX = Math.min.apply(null, xs);
+                        var maxX = Math.max.apply(null, xs);
+                        var minY = Math.min.apply(null, ys);
+                        var maxY = Math.max.apply(null, ys);
+                        var dx = (maxX - minX) * 0.25 || 50;
+                        var dy = (maxY - minY) * 0.25 || 50;
+
+                        try {{
+                            for (var t = plot.data.length-1; t>=0; t--) {{
+                                if (plot.data[t] && plot.data[t].name === '__naudit_selection') {{
+                                    Plotly.deleteTraces(plot, t);
+                                }}
+                            }}
+                        }} catch(e){{}}
+
+                        try {{
+                            Plotly.addTraces(plot, {{
+                                x: [x], y: [y], mode: 'markers',
+                                marker: {{ size: 24, color: 'rgba(255,0,0,0.9)', line: {{width:3, color:'#ffffff'}} }},
+                                hoverinfo: 'none', showlegend: false, name: '__naudit_selection'
+                            }});
+                        }} catch(e){{}}
+
+                        try {{ Plotly.relayout(plot, {{ 'xaxis.range': [x - dx, x + dx], 'yaxis.range': [y - dy, y + dy] }}, {{duration:300}}); }} catch(e){{}}
+                    }} else {{
+                        try {{ Plotly.restyle(plot, {{'marker.opacity': 0.25}}); Plotly.restyle(plot, {{'marker.opacity': 1}}, [plot.data.length-1]); }} catch(e){{}}
+                    }}
+                }} catch(e) {{ console.error('focus_on_node plotly error', e); }}
+            }})();
+            """
+        else:
+            # For PyVis, try to select node and move/fit the view to it using vis.js API
+            js = f"""
+            (function() {{
+                try {{
+                    var id = '{file_path}';
+                    var net = window.network || window.visNetwork || null;
+                    if (!net) return;
+
+                    try {{ net.selectNodes([id]); }} catch(e){{}}
+
+                    // Try to get node position and moveTo it
+                    try {{
+                        var nodeObj = (net.body && net.body.data && net.body.data.nodes) ? net.body.data.nodes.get(id) : null;
+                        if (nodeObj && (typeof net.moveTo === 'function')) {{
+                            net.moveTo({{position: {{x: nodeObj.x, y: nodeObj.y}}, animation: {{duration: 300}} }});
+                        }} else if (typeof net.focus === 'function') {{
+                            try {{ net.focus(id, {{scale: 1.0, animation: {{duration:300}}}}); }} catch(e){{}}
+                        }} else {{
+                            try {{ net.fit(); }} catch(e){{}}
+                        }}
+                    }} catch(e){{}}
+                }} catch(e) {{ console.error('focus_on_node pyvis error', e); }}
+            }})();
             """
         
         self.web_view.page().runJavaScript(js)

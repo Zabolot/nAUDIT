@@ -109,13 +109,29 @@ class FileNode:
     depends_on: Set[str] = field(default_factory=set)
     
     def get_display_text(self) -> str:
-        return str(self.errors_count) if self.errors_count > 0 else "✓"
+        """Получить текст для отображения на узле графа"""
+        if self.errors_count > 0:
+            return str(self.errors_count)
+        else:
+            return "✓"  # Галочка для чистых файлов, лучше визуально
     
     def get_node_color(self, folder_colors: Dict[str, str], severity_colors: Dict[str, str] = None) -> str:
-        # Приоритет: серьезность > папка
+        """Получить цвет узла с приоритизацией папка > серьезность
+        
+        Папки дают основной цвет для группировки файлов.
+        Серьезность может использоваться как вторичный признак (оттенок, прозрачность и т.д.)
+        """
+        # Приоритет 1: папка (для визуальной группировки)
+        folder_color = folder_colors.get(self.folder)
+        if folder_color:
+            return folder_color
+        
+        # Приоритет 2: серьезность (если папка не определена)
         if severity_colors and self.max_severity in severity_colors:
             return severity_colors[self.max_severity]
-        return folder_colors.get(self.folder, '#90EE90')
+        
+        # Fallback: зелёный для чистых файлов (OK)
+        return '#90EE90'
 
 
 # ════════════════════════════════════════════════════════════════
@@ -610,6 +626,90 @@ class GraphVisualizerWidget(QWidget):
         logger.info(f"[GraphVisualizer] 🎯 Позиции рассчитаны: {len(pos)} узлов с облачной группировкой")
         return pos
     
+    def _calculate_positions_gpu_accelerated(self, G, filtered_nodes: List[str]) -> Dict[str, Tuple[float, float]]:
+        """Рассчитать позиции с GPU ускорением (если доступен torch/CUDA)
+        
+        Для больших графов (1000+ узлов) GPU может дать ускорение в 5-10x
+        """
+        if not HAS_TORCH or not GPU_AVAILABLE or len(filtered_nodes) < 100:
+            # Возвращаемся на CPU если GPU недоступен или граф маленький
+            return self._calculate_positions_with_clustering(G, filtered_nodes)
+        
+        try:
+            import torch
+            
+            logger.info(f"[GraphVisualizer] 🚀 GPU расчёт позиций ({torch.cuda.get_device_name(0)})")
+            
+            # Преобразуем граф в матрицу смежности на GPU
+            adj_matrix = torch.tensor(
+                nx.to_numpy_array(G, nodelist=filtered_nodes, dtype=float),
+                dtype=torch.float32,
+                device='cuda'
+            )
+            
+            # Инициализируем позиции случайно
+            n_nodes = len(filtered_nodes)
+            pos_gpu = torch.randn(n_nodes, 2, device='cuda') * 10
+            
+            # Несколько итераций force-directed алгоритма на GPU
+            lr = 0.1
+            for iteration in range(20):
+                # Вычисляем силы отталкивания между всеми парами узлов
+                distances = torch.cdist(pos_gpu, pos_gpu)
+                distances[torch.eye(n_nodes, dtype=torch.bool, device='cuda')] = 1.0  # Избегаем деления на 0
+                
+                repulsion_forces = adj_matrix / (distances ** 2)
+                
+                # Применяем силы привлечения для соседних узлов
+                attraction_forces = -adj_matrix * (distances - 1.0)
+                
+                # Суммарные силы
+                forces = repulsion_forces + attraction_forces
+                movement = forces.sum(dim=1)
+                
+                # Обновляем позиции
+                pos_gpu = pos_gpu + lr * movement
+                pos_gpu = torch.clamp(pos_gpu, -100, 100)  # Ограничиваем диапазон
+            
+            # Переносим обратно на CPU и преобразуем в dict
+            pos_dict = {}
+            pos_np = pos_gpu.cpu().numpy()
+            for idx, node in enumerate(filtered_nodes):
+                pos_dict[node] = tuple(pos_np[idx])
+            
+            # Применяем облачную группировку поверх GPU позиций
+            folder_to_nodes = defaultdict(list)
+            for node in filtered_nodes:
+                folder = self.nodes[node].folder
+                folder_to_nodes[folder].append(node)
+            
+            # Сдвигаем облака
+            folders = sorted(folder_to_nodes.keys())
+            cols = max(1, int(math.sqrt(len(folders))))
+            cloud_offset = {}
+            
+            for idx, folder in enumerate(folders):
+                col = idx % cols
+                row = idx // cols
+                offset_x = (col - cols/2 + 0.5) * FOLDER_GROUP_SPACING
+                offset_y = (row - int(len(folders)/cols)/2) * FOLDER_GROUP_SPACING
+                cloud_offset[folder] = (offset_x, offset_y)
+            
+            # Применяем смещения облаков
+            final_pos = {}
+            for node in filtered_nodes:
+                folder = self.nodes[node].folder
+                offset_x, offset_y = cloud_offset.get(folder, (0, 0))
+                x, y = pos_dict[node]
+                final_pos[node] = (x + offset_x, y + offset_y)
+            
+            logger.info(f"[GraphVisualizer] ✅ GPU позиции рассчитаны для {len(final_pos)} узлов")
+            return final_pos
+            
+        except Exception as e:
+            logger.warning(f"[GraphVisualizer] ⚠️ Ошибка GPU расчёта: {e}, возвращаюсь на CPU")
+            return self._calculate_positions_with_clustering(G, filtered_nodes)
+    
     def _generate_plotly_html(self, render_thread=None) -> str:
         """Генерировать Plotly HTML"""
         if not HAS_PLOTLY:
@@ -648,32 +748,52 @@ class GraphVisualizerWidget(QWidget):
             if render_thread:
                 render_thread.progress.emit(50, "Расчёт позиций...")
             
-            # Рассчитываем позиции
-            pos = self._calculate_positions_with_clustering(G, filtered_nodes)
+            # Рассчитываем позиции (с GPU ускорением для больших графов)
+            if len(filtered_nodes) > 500 and GPU_AVAILABLE:
+                pos = self._calculate_positions_gpu_accelerated(G, filtered_nodes)
+            else:
+                pos = self._calculate_positions_with_clustering(G, filtered_nodes)
             
             if render_thread:
                 render_thread.progress.emit(60, "Построение визуализации...")
             
-            # Строим edge traces
+            # Строим edge traces (оптимизированно)
             edge_trace_list = []
             
             if self.show_edges_mode and len(G.edges()) > 0:
+                # Собираем все edge в один trace вместо создания trace на каждое edge
+                edge_x = []
+                edge_y = []
+                edge_count = 0
+                
                 for source, target in G.edges():
                     if source in pos and target in pos:
                         x0, y0 = pos[source]
                         x1, y1 = pos[target]
                         
-                        edge_trace = go.Scatter(
-                            x=[x0, x1, None],
-                            y=[y0, y1, None],
-                            mode='lines',
-                            line=dict(width=1, color='rgba(125,125,125,0.3)'),
-                            hoverinfo='none',
-                            showlegend=False,
-                            name='edges'
-                        )
-                        edge_trace_list.append(edge_trace)
+                        edge_x.extend([x0, x1, None])  # None разделяет линии
+                        edge_y.extend([y0, y1, None])
+                        edge_count += 1
+                        
+                        # Ограничиваем количество edges для оптимизации (макс. 5000)
+                        if edge_count >= 5000:
+                            logger.warning(f"[GraphVisualizer] ⚠️ Лимит edges достигнут (5000), остальные {len(G.edges()) - 5000} скрыты")
+                            break
+                
+                if edge_x:  # Если есть edges
+                    edge_trace = go.Scatter(
+                        x=edge_x,
+                        y=edge_y,
+                        mode='lines',
+                        line=dict(width=1, color='rgba(125,125,125,0.3)'),
+                        hoverinfo='none',
+                        showlegend=False,
+                        name='edges'
+                    )
+                    edge_trace_list.append(edge_trace)
+                    logger.info(f"[GraphVisualizer] 📍 Edges: {edge_count} линий в одном trace")
             
+
             # Узлы
             node_x = []
             node_y = []
@@ -786,12 +906,42 @@ class GraphVisualizerWidget(QWidget):
             if render_thread:
                 render_thread.progress.emit(20, "Создание PyVis сети...")
             
-            net = Network(height='600px', directed=True)
+            net = Network(height='600px', directed=False)
             
+            # ПОЛНОСТЬЮ отключаем все параметры физики и гравитации
             try:
-                net.physics.enabled = True
-            except:
-                pass
+                # Отключаем основную физику
+                net.physics.enabled = False
+                
+                # Отключаем стабилизацию
+                net.physics.stabilization.enabled = False
+                net.physics.stabilization.iterations = 0
+                net.physics.stabilization.fit = False
+                
+                # Отключаем гравитацию и другие силы
+                net.physics.barnesHut.enabled = False
+                net.physics.forceAtlas2Based.enabled = False
+                net.physics.repulsion.enabled = False
+                
+                # Фиксируем все узлы
+                net.set_options("""
+                {
+                    "physics": {
+                        "enabled": false,
+                        "barnesHut": {"enabled": false},
+                        "forceAtlas2Based": {"enabled": false},
+                        "repulsion": {"enabled": false},
+                        "hierarchicalRepulsion": {"enabled": false},
+                        "stabilization": {"enabled": false, "iterations": 0}
+                    },
+                    "interaction": {
+                        "navigationButtons": true,
+                        "keyboard": true
+                    }
+                }
+                """)
+            except Exception as e:
+                logger.warning(f"[GraphVisualizer] ⚠️ Ошибка при отключении физики PyVis: {e}")
             
             if render_thread:
                 render_thread.progress.emit(40, "Добавление узлов...")
@@ -807,8 +957,11 @@ class GraphVisualizerWidget(QWidget):
                     if source in filtered_nodes and target in filtered_nodes:
                         G.add_edge(source, target)
             
-            # Рассчитываем позиции
-            pos = self._calculate_positions_with_clustering(G, filtered_nodes)
+            # Рассчитываем позиции (с GPU ускорением для больших графов)
+            if len(filtered_nodes) > 500 and GPU_AVAILABLE:
+                pos = self._calculate_positions_gpu_accelerated(G, filtered_nodes)
+            else:
+                pos = self._calculate_positions_with_clustering(G, filtered_nodes)
             
             # Добавляем узлы в PyVis
             for file_path in filtered_nodes:
@@ -840,11 +993,35 @@ class GraphVisualizerWidget(QWidget):
             if render_thread:
                 render_thread.progress.emit(60, "Добавление связей...")
             
-            # Добавляем связи
+            # Добавляем связи (ограничиваем количество для оптимизации)
+            edge_count = 0
+            max_edges = 10000  # Макс. связей в PyVis
+            
             if self.show_edges_mode:
                 for source, target in self.edges:
                     if source in filtered_nodes and target in filtered_nodes:
-                        net.add_edge(source, target)
+                        try:
+                            net.add_edge(source, target)
+                            edge_count += 1
+                            
+                            # Ограничиваем количество для оптимизации
+                            if edge_count >= max_edges:
+                                logger.warning(f"[GraphVisualizer] ⚠️ Лимит edges достигнут ({max_edges}), остальные {len(self.edges) - edge_count} скрыты")
+                                break
+                        except Exception as e:
+                            logger.warning(f"[GraphVisualizer] ⚠️ Ошибка при добавлении edge {source}->{target}: {e}")
+            
+            if edge_count > 0:
+                logger.info(f"[GraphVisualizer] 📍 PyVis: добавлено {edge_count} связей")
+            
+            # ДОПОЛНИТЕЛЬНО: Убеждаемся что физика отключена ПОСЛЕ добавления edges
+            # (PyVis может попытаться переделать позиции при добавлении edges)
+            try:
+                net.physics.enabled = False
+                net.physics.stabilization.enabled = False
+                net.show = False  # Отключаем автоматический показ
+            except:
+                pass
             
             if render_thread:
                 render_thread.progress.emit(80, "Генерация HTML...")
@@ -877,28 +1054,49 @@ class GraphVisualizerWidget(QWidget):
             return self._generate_error_html(f"Ошибка PyVis: {str(e)}")
     
     def _filter_nodes_by_severity(self) -> List[str]:
-        """Отфильтровать узлы"""
+        """Отфильтровать узлы по серьезности"""
         severity_filter = self.current_severity_filter
         
+        # "Все" означает показать все узлы с ошибками И без ошибок
         if severity_filter == "Все":
             return list(self.nodes.keys())
         
+        # Для конкретного фильтра показываем узлы с этой серьезностью и выше
         severity_order = {'CRITICAL': 4, 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1, 'OK': 0}
         filter_level = severity_order.get(severity_filter, 0)
         
         filtered = []
         for file_path, node in self.nodes.items():
             node_level = severity_order.get(node.max_severity, 0)
+            # Включаем узлы с уровнем >= filter_level (то есть более серьезные ошибки)
             if node_level >= filter_level:
                 filtered.append(file_path)
         
+        logger.info(f"[GraphVisualizer] 🔍 Фильтрация: {len(filtered)}/{len(self.nodes)} узлов (фильтр: {severity_filter})")
         return filtered
     
     def _inject_qwebchannel_code(self, html_content: str) -> str:
-        """Инжектировать JS для QWebChannel"""
+        """Инжектировать JS для QWebChannel и отключения физики PyVis"""
         js_code = """
         <script>
         window.addEventListener('load', function() {
+            // ⚠️ КРИТИЧНО: Отключаем физику PyVis после загрузки
+            if (window.network) {
+                try {
+                    window.network.physics.enabled = false;
+                    window.network.physics.barnesHut.enabled = false;
+                    window.network.physics.forceAtlas2Based.enabled = false;
+                    window.network.physics.repulsion.enabled = false;
+                    window.network.physics.hierarchicalRepulsion.enabled = false;
+                    window.network.physics.stabilization.enabled = false;
+                    window.network.physics.stabilization.iterations = 0;
+                    window.network.physics.stabilization.fit = false;
+                    console.log('[PyVis] Physics полностью отключена в JavaScript');
+                } catch(e) {
+                    console.error('[PyVis] Ошибка отключения физики:', e);
+                }
+            }
+            
             // Обработчик кликов Plotly
             var plot = document.querySelector('.plotly-graph-div');
             if (plot && plot.on) {
@@ -1124,6 +1322,60 @@ class GraphVisualizerWidget(QWidget):
         
         self.focus_on_node(normalized_path)
         logger.info(f"[GraphVisualizer] ✅ Выделен файл: {normalized_path}")
+    
+    def export_current_graph(self) -> Optional[Path]:
+        """Экспортировать оба варианта графа (Plotly И PyVis) в папку reports/graphs/
+        
+        Returns:
+            Path к папке с экспортированными графами или None
+        """
+        try:
+            if not self.nodes:
+                logger.warning("[GraphVisualizer] ⚠️ Граф пуст, нечего экспортировать")
+                return None
+            
+            # Определяем папку экспорта
+            reports_dir = Path.home() / ".naudit" / "reports"
+            graphs_dir = reports_dir / "graphs"
+            graphs_dir.mkdir(parents=True, exist_ok=True)
+            
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            exported_files = []
+            
+            # Экспортируем Plotly версию
+            try:
+                html_plotly = self._generate_plotly_html()
+                if html_plotly:
+                    plotly_path = graphs_dir / f"graph_plotly_{timestamp}.html"
+                    plotly_path.write_text(html_plotly, encoding='utf-8')
+                    exported_files.append(plotly_path)
+                    logger.info(f"[GraphVisualizer] ✅ Plotly граф экспортирован: {plotly_path}")
+            except Exception as e:
+                logger.error(f"[GraphVisualizer] ❌ Ошибка экспорта Plotly: {e}")
+            
+            # Экспортируем PyVis версию
+            try:
+                html_pyvis = self._generate_pyvis_html()
+                if html_pyvis:
+                    pyvis_path = graphs_dir / f"graph_pyvis_{timestamp}.html"
+                    pyvis_path.write_text(html_pyvis, encoding='utf-8')
+                    exported_files.append(pyvis_path)
+                    logger.info(f"[GraphVisualizer] ✅ PyVis граф экспортирован: {pyvis_path}")
+            except Exception as e:
+                logger.error(f"[GraphVisualizer] ❌ Ошибка экспорта PyVis: {e}")
+            
+            if exported_files:
+                logger.info(f"[GraphVisualizer] 📁 Графы экспортированы в: {graphs_dir}")
+                return graphs_dir
+            else:
+                logger.warning("[GraphVisualizer] ⚠️ Не удалось создать ни один граф для экспорта")
+                return None
+            
+        except Exception as e:
+            logger.exception(f"[GraphVisualizer] ❌ Ошибка экспорта: {e}")
+            return None
     
     def closeEvent(self, event):
         """Завершение виджета"""

@@ -405,9 +405,10 @@ class MainWindowV4(QMainWindow):
             """
             
             if graph_path:
-                msg += f"📈 Граф: {graph_path}<br>"
+                # graph_path теперь может быть папкой с графами
+                msg += f"📈 Графы: <a href='file:///{graph_path}'>{graph_path}</a><br>"
             else:
-                msg += "<i style='color:#999'>📈 Граф: Нет активного графика для экспорта</i><br>"
+                msg += "<i style='color:#999'>📈 Графы: Не удалось создать графики для экспорта</i><br>"
             
             self.status_bar.showMessage("✅ Отчеты экспортированы")
         except Exception as e:

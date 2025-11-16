@@ -108,13 +108,20 @@ class ErrorVisualizationWidget(QWidget):
         # Связываем сигналы
         self.tree_widget.issue_selected.connect(self._on_issue_selected)
         self.graph_widget.file_selected.connect(self.file_selected.emit)
-        
+
         # ✅ НОВОЕ: Синхронизация дерева и графа
-        # Когда выбран файл в дереве - выделяем в графе
+        # Когда выбран файл в основном дереве - выделяем в основном графе
         self.tree_widget.file_selected.connect(self._on_tree_file_selected)
-        # Когда выбран файл в графе - выделяем в дереве
+        # Когда выбран файл в основном графе - выделяем в основном дереве
         if hasattr(self.graph_widget, 'file_selected'):
             self.graph_widget.file_selected.connect(self._on_graph_file_selected)
+
+        # Для split режима: соединяем их между собой
+        self.tree_widget_split.issue_selected.connect(self._on_issue_selected)
+        self.graph_widget_split.file_selected.connect(self.file_selected.emit)
+        self.tree_widget_split.file_selected.connect(self._on_tree_file_selected_split)
+        if hasattr(self.graph_widget_split, 'file_selected'):
+            self.graph_widget_split.file_selected.connect(self._on_graph_file_selected_split)
         
         # Устанавливаем начальную страницу
         self.stacked_widget.setCurrentIndex(0)
@@ -171,6 +178,25 @@ class ErrorVisualizationWidget(QWidget):
         print("[ErrorVisualizationWidget] ⚠ Переключаюсь на split - refresh...")
         if hasattr(self.graph_widget_split, '_render_graph'):
             self.graph_widget_split._render_graph()
+
+    def _on_tree_file_selected_split(self, file_path: str):
+        """
+        Синхронизация для split view: файл выбран в левом дереве split -> выделяем в правом графе split
+        """
+        if not file_path:
+            return
+        if hasattr(self.graph_widget_split, 'highlight_file'):
+            self.graph_widget_split.highlight_file(file_path)
+
+    def _on_graph_file_selected_split(self, file_path: str):
+        """
+        Синхронизация для split view: файл выбран в правом графе split -> выделяем в левом дереве split
+        """
+        if not file_path:
+            return
+        normalized_path = str(file_path).replace("\\", "/")
+        if hasattr(self.tree_widget_split, 'select_item_by_path'):
+            self.tree_widget_split.select_item_by_path(normalized_path)
     
     def _update_buttons(self):
         """Обновить состояние кнопок"""
@@ -187,12 +213,17 @@ class ErrorVisualizationWidget(QWidget):
             project_root: корень проекта
         """
         # Заполняем компоненты основных режимов
+        # Сначала дерево (оно является источником истины по маппингу файлов->issues)
         self.tree_widget.populate_from_report(report, project_root)
-        self.graph_widget.populate_from_report(report, project_root)
+
+        # Передаём карту files_with_issues в графы, чтобы избежать рассинхронизации
+        files_map = getattr(self.tree_widget, 'files_with_issues', None)
+        self.graph_widget.populate_from_report(report, project_root, files_with_issues=files_map)
         
         # Заполняем компоненты split режима
         self.tree_widget_split.populate_from_report(report, project_root)
-        self.graph_widget_split.populate_from_report(report, project_root)
+        files_map_split = getattr(self.tree_widget_split, 'files_with_issues', None)
+        self.graph_widget_split.populate_from_report(report, project_root, files_with_issues=files_map_split)
     
     def clear(self):
         """Очистить обе визуализации"""

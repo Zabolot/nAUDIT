@@ -346,7 +346,7 @@ class GraphVisualizerWidget(QWidget):
         layout.addWidget(self.web_view)
         self.setLayout(layout)
     
-    def populate_from_report(self, report, project_root: str):
+    def populate_from_report(self, report, project_root: str, files_with_issues: Optional[Dict[str, List]] = None):
         """Загрузить граф из отчёта"""
         logger.info(f"[GraphVisualizer v2.7] [LOAD] Загружаю отчёт из {project_root}")
         
@@ -365,16 +365,30 @@ class GraphVisualizerWidget(QWidget):
             
             if project_path.exists():
                 for py_file in project_path.rglob("*.py"):
-                    file_path = str(py_file.relative_to(project_path)).replace('\\', '/')
-                    
+                    # Normalize to the same form as tree widget
+                    rel = py_file.relative_to(project_path)
+                    file_path = str(rel).replace('\\', '/')
+                    file_path = self._normalize_path(file_path, project_root)
+
                     if not self._is_excluded_path(file_path):
                         python_files.add(file_path)
                         if file_path not in files_info:
+                            # Try to compute lines of code for sizing
+                            lines = 0
+                            try:
+                                full = (project_path / rel).resolve()
+                                if full.exists():
+                                    text = full.read_text(encoding='utf-8', errors='ignore')
+                                    # Count lines robustly
+                                    lines = text.count('\n') + 1 if text else 0
+                            except Exception:
+                                lines = 0
+
                             files_info[file_path] = {
                                 'errors': 0,
                                 'max_severity': 'OK',
                                 'error_types': defaultdict(int),
-                                'lines': 0,
+                                'lines': lines,
                             }
             
             logger.info(f"[GraphVisualizer v2.7] 📁 Найдено Python файлов: {len(python_files)}")
@@ -382,40 +396,167 @@ class GraphVisualizerWidget(QWidget):
             logger.error(f"[GraphVisualizer] ⚠️ Ошибка сканирования: {e}")
         
         # Собрать ошибки
-        code_issues = getattr(report, 'code_issues', None) or \
-                      (getattr(report, 'metrics', None) and getattr(report.metrics, 'code_issues', None))
-        
-        if code_issues:
-            for issue in code_issues:
+        if files_with_issues:
+            # files_with_issues is expected to be a mapping: normalized_path -> list_of_issue_objects
+            logger.info(f"[GraphVisualizer] Использую внешнюю карту файлов с ошибками: {len(files_with_issues)} файлов")
+            for fp, issues in files_with_issues.items():
                 try:
-                    if isinstance(issue, dict):
-                        file_path = str(issue.get('file', '')).replace('\\', '/')
-                        severity = issue.get('severity', 'LOW')
-                    else:
-                        file_path = str(getattr(issue, 'file', '')).replace('\\', '/')
-                        severity = getattr(issue, 'severity', 'LOW')
-                    
-                    if not file_path or self._is_excluded_path(file_path):
+                    if not fp or self._is_excluded_path(fp):
                         continue
-                    
-                    if file_path not in files_info:
-                        files_info[file_path] = {
+                    if fp not in files_info:
+                        # try to compute lines if not present
+                        lines = 0
+                        try:
+                            project_path = Path(project_root)
+                            full = (project_path / fp).resolve()
+                            if full.exists():
+                                text = full.read_text(encoding='utf-8', errors='ignore')
+                                lines = text.count('\n') + 1 if text else 0
+                        except Exception:
+                            lines = 0
+                        files_info[fp] = {
                             'errors': 0,
-                            'max_severity': 'LOW',
+                            'max_severity': 'OK',
                             'error_types': defaultdict(int),
-                            'lines': 0,
+                            'lines': lines,
                         }
-                    
-                    files_info[file_path]['errors'] += 1
-                    files_info[file_path]['error_types'][severity] += 1
-                    
-                    sev_order = {'CRITICAL': 4, 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1}
-                    curr = sev_order.get(files_info[file_path]['max_severity'], 0)
-                    new = sev_order.get(severity, 0)
-                    if new > curr:
-                        files_info[file_path]['max_severity'] = severity
+
+                    count = len(issues) if hasattr(issues, '__len__') else 1
+                    files_info[fp]['errors'] = int(files_info[fp].get('errors', 0)) + int(count)
+                    # determine max severity
+                    try:
+                        sev_order = {'CRITICAL': 4, 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1, 'OK': 0}
+                        curr = sev_order.get(files_info[fp].get('max_severity', 'OK'), 0)
+                        max_sev = 'OK'
+                        for issue in issues:
+                            sev = getattr(issue, 'severity', None) or (issue.get('severity') if isinstance(issue, dict) else None) or 'LOW'
+                            sev_name = sev.name if hasattr(sev, 'name') else str(sev)
+                            if sev_order.get(sev_name, 0) > sev_order.get(max_sev, 0):
+                                max_sev = sev_name
+                        if sev_order.get(max_sev,0) > curr:
+                            files_info[fp]['max_severity'] = max_sev
+                    except Exception:
+                        pass
                 except Exception:
                     pass
+        else:
+            code_issues = getattr(report, 'code_issues', None) or \
+                          (getattr(report, 'metrics', None) and getattr(report.metrics, 'code_issues', None))
+            
+            if code_issues:
+                for issue in code_issues:
+                    try:
+                        if isinstance(issue, dict):
+                            file_path = str(issue.get('file', '')).replace('\\', '/')
+                            file_path = self._normalize_path(file_path, project_root)
+                            severity = issue.get('severity', 'LOW')
+                        else:
+                            file_path = str(getattr(issue, 'file', '')).replace('\\', '/')
+                            file_path = self._normalize_path(file_path, project_root)
+                            severity = getattr(issue, 'severity', 'LOW')
+                        
+                        if not file_path or self._is_excluded_path(file_path):
+                            continue
+                        
+                        if file_path not in files_info:
+                            files_info[file_path] = {
+                                'errors': 0,
+                                'max_severity': 'LOW',
+                                'error_types': defaultdict(int),
+                                'lines': 0,
+                            }
+                        
+                        files_info[file_path]['errors'] += 1
+                        files_info[file_path]['error_types'][severity] += 1
+                        
+                        sev_order = {'CRITICAL': 4, 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1}
+                        curr = sev_order.get(files_info[file_path]['max_severity'], 0)
+                        new = sev_order.get(severity, 0)
+                        if new > curr:
+                            files_info[file_path]['max_severity'] = severity
+                    except Exception:
+                        pass
+
+        # Если отчёт содержит агрегированные ошибки для корня проекта (например '.', '')
+        # попробуем распределить их по реальным файлам пропорционально по lines (если есть данные).
+        try:
+            aggregate_keys = [k for k in list(files_info.keys()) if k in ('.', '', str(Path(project_root)), str(Path(project_root).as_posix()) )]
+            for agg in aggregate_keys:
+                agg_info = files_info.get(agg)
+                if not agg_info:
+                    continue
+                agg_errors = int(agg_info.get('errors', 0) or 0)
+                if agg_errors <= 0:
+                    # просто удаляем ключ и продолжаем
+                    files_info.pop(agg, None)
+                    continue
+
+                # Собираем кандидатов для распределения (только реальные python файлы)
+                candidates = [ (fp, info) for fp, info in files_info.items() if fp != agg ]
+                total_lines = sum(max(1, info.get('lines', 0)) for _, info in candidates) or len(candidates) or 1
+
+                assigned = 0
+                # Распределяем пропорционально lines, если lines == 0 - равномерно
+                for idx, (fp, info) in enumerate(candidates):
+                    if idx == len(candidates) - 1:
+                        share = agg_errors - assigned
+                    else:
+                        lines = max(1, info.get('lines', 0))
+                        share = int(round(agg_errors * (lines / total_lines)))
+                        # guard
+                        if share < 0:
+                            share = 0
+                    info['errors'] = int(info.get('errors', 0) or 0) + share
+                    # propagate severity if aggregate severity is higher
+                    try:
+                        sev_order = {'CRITICAL': 4, 'HIGH': 3, 'MEDIUM': 2, 'LOW': 1, 'OK': 0}
+                        if sev_order.get(agg_info.get('max_severity', 'LOW'),0) > sev_order.get(info.get('max_severity','OK'),0):
+                            info['max_severity'] = agg_info.get('max_severity', info.get('max_severity','OK'))
+                    except Exception:
+                        pass
+                    assigned += share
+
+                # Удаляем агрегатный ключ
+                files_info.pop(agg, None)
+                logger.info(f"[GraphVisualizer] ✨ Распределено {agg_errors} агрегированных ошибок ({agg}) по {len(candidates)} файлам")
+        except Exception as e:
+            logger.debug(f"[GraphVisualizer] Ошибка при распределении aggregate errors: {e}")
+
+        # --- Диагностический дамп: поместим краткую сводку files_info в ~/.naudit/reports/
+        try:
+            reports_dir = Path.home() / ".naudit" / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            debug_path = reports_dir / "debug_graph_files_info.json"
+
+            # Сформируем упрощённый словарь для отладки (не будем сериализовать defaultdict напрямую)
+            sample = {
+                'project_root': str(project_root),
+                'python_files_count': len(python_files) if 'python_files' in locals() else 0,
+                'files_info_count': len(files_info),
+                'files_info_sample': []
+            }
+
+            for i, (fp, info) in enumerate(files_info.items()):
+                if i >= 200:
+                    break
+                exists_on_disk = False
+                try:
+                    full = (Path(project_root) / fp).resolve()
+                    exists_on_disk = full.exists()
+                except Exception:
+                    exists_on_disk = False
+
+                sample['files_info_sample'].append({
+                    'file': fp,
+                    'errors': int(info.get('errors', 0)),
+                    'max_severity': info.get('max_severity'),
+                    'exists_on_disk': exists_on_disk
+                })
+
+            debug_path.write_text(json.dumps(sample, ensure_ascii=False, indent=2), encoding='utf-8')
+            logger.info(f"[GraphVisualizer] 🐞 Debug summary written to: {debug_path}")
+        except Exception as e:
+            logger.debug(f"[GraphVisualizer] 🐞 Не удалось записать debug summary: {e}")
         
         # Создать узлы
         for file_path, info in files_info.items():
@@ -486,6 +627,35 @@ class GraphVisualizerWidget(QWidget):
         if path.name in EXCLUDE_FILES:
             return True
         return False
+
+    def _normalize_path(self, file_path: str, project_root: str) -> str:
+        """Нормализовать путь: привести к POSIX-формату и попытаться сделать относительным к project_root.
+
+        Возвращает относительный путь (POSIX, без ведущего './') если файл находится внутри project_root,
+        иначе возвращает абсолютный путь в POSIX-формате.
+        """
+        try:
+            p = Path(file_path)
+            project_root_path = Path(project_root or ".").resolve()
+
+            # Если путь не абсолютный - попробуем разрешить относительно project_root
+            if not p.is_absolute():
+                candidate = (project_root_path / p).resolve()
+            else:
+                candidate = p.resolve()
+
+            try:
+                rel = candidate.relative_to(project_root_path)
+                rel_str = str(rel).replace('\\', '/')
+                # Strip leading './' if any
+                if rel_str.startswith('./'):
+                    rel_str = rel_str[2:]
+                return rel_str
+            except Exception:
+                # Не удалось сделать относительным - вернуть абсолютный путь
+                return str(candidate).replace('\\', '/')
+        except Exception:
+            return str(file_path).replace('\\', '/')
     
     def _get_folder_group(self, file_path: str) -> str:
         """Получить группу папки"""
@@ -818,7 +988,13 @@ class GraphVisualizerWidget(QWidget):
                 else:
                     node_text.append(node.get_display_text())
                 
-                size = max(10, min(30, 10 + node.errors_count))
+                # Размер узла зависит от строк кода (lines_of_code), более релевантно для визуального веса
+                try:
+                    loc = max(0, int(node.lines_of_code or 0))
+                    size = int(10 + math.log1p(loc) * 4)
+                    size = max(8, min(48, size))
+                except Exception:
+                    size = max(10, min(30, 10 + node.errors_count))
                 node_size.append(size)
                 
                 color = node.get_node_color(self.folder_colors, self.severity_colors)
@@ -973,7 +1149,13 @@ class GraphVisualizerWidget(QWidget):
                     label = node.get_display_text()
                 
                 color = node.get_node_color(self.folder_colors, self.severity_colors)
-                size = max(15, min(50, 15 + node.errors_count * 2))
+                # Для PyVis размер тоже зависит от LOC (более крупные файлы — больше маркер)
+                try:
+                    loc = max(0, int(node.lines_of_code or 0))
+                    size = int(8 + math.log1p(loc) * 6)
+                    size = max(10, min(60, size))
+                except Exception:
+                    size = max(15, min(50, 15 + node.errors_count * 2))
                 folder_group = node.folder
                 
                 # Используем расчётные позиции
@@ -988,6 +1170,9 @@ class GraphVisualizerWidget(QWidget):
                     group=folder_group,
                     x=x * 10,  # PyVis масштабирует по-своему
                     y=y * 10,
+                    # Закрепляем позиции на стороне клиента
+                    fixed={'x': True, 'y': True},
+                    physics=False,
                 )
             
             if render_thread:
@@ -1077,58 +1262,110 @@ class GraphVisualizerWidget(QWidget):
     
     def _inject_qwebchannel_code(self, html_content: str) -> str:
         """Инжектировать JS для QWebChannel и отключения физики PyVis"""
+        # Более устойчивый JS: пытаемся отключить физику после инициализации vis.js,
+        # делаем несколько повторных попыток и подписываемся на события стабилизации.
         js_code = """
         <script>
-        window.addEventListener('load', function() {
-            // ⚠️ КРИТИЧНО: Отключаем физику PyVis после загрузки
-            if (window.network) {
+        (function() {
+            function tryDisableNetworkPhysics() {
                 try {
-                    window.network.physics.enabled = false;
-                    window.network.physics.barnesHut.enabled = false;
-                    window.network.physics.forceAtlas2Based.enabled = false;
-                    window.network.physics.repulsion.enabled = false;
-                    window.network.physics.hierarchicalRepulsion.enabled = false;
-                    window.network.physics.stabilization.enabled = false;
-                    window.network.physics.stabilization.iterations = 0;
-                    window.network.physics.stabilization.fit = false;
-                    console.log('[PyVis] Physics полностью отключена в JavaScript');
-                } catch(e) {
-                    console.error('[PyVis] Ошибка отключения физики:', e);
-                }
-            }
-            
-            // Обработчик кликов Plotly
-            var plot = document.querySelector('.plotly-graph-div');
-            if (plot && plot.on) {
-                plot.on('plotly_click', function(data) {
-                    var point = data.points[0];
-                    var filePath = null;
-                    try {
-                        if (point.customdata) filePath = point.customdata;
-                        else if (point.text) filePath = point.text;
-                    } catch(e) {}
-                    if (filePath && window.graph_bridge) {
-                        window.graph_bridge.onNodeClicked(String(filePath));
+                    var net = window.network || window.visNetwork || window.Network || null;
+                    if (!net) {
+                        return false;
                     }
-                });
-            }
-            
-            // Обработчик кликов PyVis
-            try {
-                if (window.network && window.network.on) {
-                    window.network.on('click', function(params) {
+
+                    try {
+                        // Современный способ: вызвать setOptions и остановить симуляцию
+                        if (typeof net.setOptions === 'function') {
+                            net.setOptions({ physics: { enabled: false, stabilization: { enabled: false, iterations: 0 } } });
+                        }
+
+                        if (typeof net.stopSimulation === 'function') {
+                            try { net.stopSimulation(); } catch(e) {}
+                        }
+
+                        // Обновим узлы: пометим fixed и отключим physics per-node
                         try {
-                            if (params.nodes && params.nodes.length > 0) {
-                                var id = params.nodes[0];
-                                if (window.graph_bridge) {
-                                    window.graph_bridge.onNodeClicked(String(id));
+                            if (net.body && net.body.data && net.body.data.nodes) {
+                                var nodes = net.body.data.nodes.get();
+                                for (var i=0;i<nodes.length;i++) {
+                                    var n = nodes[i];
+                                    n.fixed = {x:true, y:true};
+                                    n.physics = false;
                                 }
+                                net.body.data.nodes.update(nodes);
+                            }
+                        } catch(e) {
+                            console.warn('[PyVis] Не удалось обновить узлы:', e);
+                        }
+
+                        // Подпишемся на событие стабилизации (если есть) и дополнительно остановим симуляцию
+                        try {
+                            if (typeof net.on === 'function') {
+                                net.on('stabilizationIterationsDone', function() {
+                                    try { net.setOptions({ physics: { enabled: false } }); } catch(e) {}
+                                    try { net.stopSimulation(); } catch(e) {}
+                                });
                             }
                         } catch(e) {}
-                    });
+
+                        console.log('[PyVis] Physics forcibly disabled (post-init)');
+                        return true;
+                    } catch(e) {
+                        console.error('[PyVis] Ошибка при отключении физики:', e);
+                        return false;
+                    }
+                } catch(e) {
+                    return false;
                 }
-            } catch(e) {}
-        });
+            }
+
+            window.addEventListener('load', function() {
+                // Попытки: выполняем несколько раз с задержками чтобы поймать момент инициализации vis.js
+                var attempts = [50, 200, 800, 1500, 3000];
+                for (var i=0;i<attempts.length;i++) {
+                    (function(delay){
+                        setTimeout(function(){
+                            tryDisableNetworkPhysics();
+                        }, delay);
+                    })(attempts[i]);
+                }
+
+                // Обработчик кликов Plotly
+                try {
+                    var plot = document.querySelector('.plotly-graph-div');
+                    if (plot && plot.on) {
+                        plot.on('plotly_click', function(data) {
+                            var point = data.points && data.points[0];
+                            var filePath = null;
+                            try {
+                                if (point && point.customdata) filePath = point.customdata;
+                                else if (point && point.text) filePath = point.text;
+                            } catch(e) {}
+                            if (filePath && window.graph_bridge) {
+                                try { window.graph_bridge.onNodeClicked(String(filePath)); } catch(e) {}
+                            }
+                        });
+                    }
+                } catch(e) { console.error('[Plotly] click hook failed', e); }
+
+                // Обработчик кликов PyVis
+                try {
+                    if (window.network && typeof window.network.on === 'function') {
+                        window.network.on('click', function(params) {
+                            try {
+                                if (params.nodes && params.nodes.length > 0) {
+                                    var id = params.nodes[0];
+                                    if (window.graph_bridge) {
+                                        try { window.graph_bridge.onNodeClicked(String(id)); } catch(e) {}
+                                    }
+                                }
+                            } catch(e) {}
+                        });
+                    }
+                } catch(e) {}
+            });
+        })();
         </script>
         """
         

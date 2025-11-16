@@ -139,12 +139,12 @@ def test_display_text_numeric():
         )
         
         text_without_errors = node_without_errors.get_display_text()
-        if text_without_errors == "0":
-            print(f"✅ Узел без ошибок показывает: '{text_without_errors}'")
-            print("✅ PASSED: Счётчик ошибок показывает числа\n")
+        if text_without_errors == "✓":
+            print(f"✅ Узел без ошибок показывает: '{text_without_errors}' (галочка)")
+            print("✅ PASSED: Счётчик ошибок показывает правильно\n")
             return True
         else:
-            print(f"❌ Ожидалось '0', получено '{text_without_errors}'")
+            print(f"❌ Ожидалось '✓', получено '{text_without_errors}'")
             return False
             
     except Exception as e:
